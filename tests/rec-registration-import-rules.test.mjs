@@ -6,11 +6,16 @@ import {
   determineRegistrationImportAction,
   getCouponImportValidationErrors,
   getRegistrationImportHeaders,
+  getRegistrationImportDownloadHeaders,
   getRegistrationImportSampleRows,
   protectCsvSpreadsheetValue,
   validateAndMapRegistrationImportRow,
   validateRegistrationImportHeaders,
 } from "../lib/rec-conference/registration-import-rules.mjs"
+import {
+  getRecBadgeConferenceTitle,
+  normalizeRecOptionalSessions,
+} from "../lib/rec-conference/registration-tracks.mjs"
 
 const conferenceDays = [
   { label: "Day 1", date: "2026-10-19" },
@@ -106,6 +111,7 @@ test("attendee rows are normalized and use explicit Kampala event timestamps", (
   assert.equal(result.normalizedEmail, "amina@example.com")
   assert.deepEqual(result.payload.sector, ["Private"])
   assert.deepEqual(result.payload.daysAttending, ["Day 1", "Day 3"])
+  assert.deepEqual(result.payload.additionalSessions, [])
   assert.equal(result.payload.eventStart, "2026-10-19T05:00:00.000Z")
   assert.equal(result.payload.eventEnd, "2026-10-21T15:00:00.000Z")
   assert.equal(result.payload.registrationType, "Attendee")
@@ -200,4 +206,47 @@ test("coupon validation enforces attendee type, conference and aggregate capacit
 test("CSV error exports neutralize spreadsheet formulas", () => {
   assert.equal(protectCsvSpreadsheetValue("=HYPERLINK(\"bad\")"), "'=HYPERLINK(\"bad\")")
   assert.equal(protectCsvSpreadsheetValue("Amina"), "Amina")
+})
+
+test("AdditionalSessions is optional in import files and does not break existing templates", () => {
+  const standard = getRegistrationImportHeaders(REC_IMPORT_TEMPLATE_TYPES.STANDARD)
+  assert.equal(standard.includes("AdditionalSessions"), false)
+  assert.equal(
+    validateRegistrationImportHeaders(
+      [...standard, "AdditionalSessions"],
+      REC_IMPORT_TEMPLATE_TYPES.STANDARD
+    ).valid,
+    true
+  )
+  assert.equal(
+    getRegistrationImportDownloadHeaders(REC_IMPORT_TEMPLATE_TYPES.STANDARD).includes("AdditionalSessions"),
+    true
+  )
+
+  const selected = validateAndMapRegistrationImportRow(
+    { ...validRow, AdditionalSessions: "Business Forum / Marketplace" },
+    {
+      templateType: REC_IMPORT_TEMPLATE_TYPES.STANDARD,
+      conferenceDays,
+      validCountries: ["Uganda"],
+    }
+  )
+  assert.equal(selected.valid, true)
+  assert.deepEqual(selected.payload.additionalSessions, ["business_forum"])
+})
+
+test("Business Forum badge titles apply only when that optional session is selected", () => {
+  const conference = { year: 2026, title: "Renewable Energy Conference & Expo 2026", shortName: "REC 2026" }
+  assert.equal(
+    getRecBadgeConferenceTitle(conference, { additionalSessions: [] }),
+    "Renewable Energy Conference & Expo 2026"
+  )
+  assert.equal(
+    getRecBadgeConferenceTitle(conference, { additionalSessions: ["business_forum"] }),
+    "REC 2026 & Expo | Business Forum"
+  )
+  assert.deepEqual(
+    normalizeRecOptionalSessions("Yes"),
+    ["business_forum"]
+  )
 })

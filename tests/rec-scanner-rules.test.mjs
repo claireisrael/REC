@@ -27,6 +27,13 @@ import {
   shouldRevokeRecScannerCredentials,
   getDefaultScannerAccessWindow,
   resolveTeraOperatorAccess,
+  shouldSendRecScanConfirmationEmail,
+  getRecScanConfirmationCopy,
+  REC_WEB_APP_URL,
+  buildRecBadgeNumber,
+  formatRecBadgeNumber,
+  nextRecBadgeSequence,
+  expandRecBadgeNumberCandidates,
 } from "../lib/rec-conference/scanning-rules.mjs"
 
 test("scan events are closed before their start time", () => {
@@ -450,5 +457,72 @@ test("session hopper detection flags a hall change inside the trailing window", 
   assert.equal(
     isSessionHopperScan({ deployedLocation: "Session Hall A" }, "Session Hall A"),
     false
+  )
+})
+
+test("scan confirmation emails are sent for accepted non-lunch scans", () => {
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "accepted",
+    eventType: "conference_entry",
+    email: "attendee@nrep.ug",
+  }), true)
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "accepted",
+    eventType: "session_entry",
+    email: "attendee@nrep.ug",
+  }), true)
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "accepted",
+    eventType: "lunch",
+    email: "attendee@nrep.ug",
+  }), false)
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "duplicate",
+    eventType: "conference_entry",
+    email: "attendee@nrep.ug",
+  }), false)
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "accepted",
+    eventType: "conference_entry",
+    email: "",
+  }), false)
+})
+
+test("scan confirmation emails follow the scanned event and link to the REC web app", () => {
+  const conference = { title: "Renewable Energy Conference & Expo 2026", shortName: "REC 2026" }
+  const registration = { name: "Claire Namagala" }
+
+  const entrance = getRecScanConfirmationCopy({
+    event: { type: "conference_entry", name: "Main Entrance Day 1", venue: "Main Entrance" },
+    conference,
+    registration,
+  })
+  assert.equal(entrance.siteUrl, REC_WEB_APP_URL)
+  assert.match(entrance.subject, /conference entrance recorded/)
+  assert.match(entrance.intro, /Main Entrance/)
+
+  const session = getRecScanConfirmationCopy({
+    event: { type: "session_entry", name: "Katonga Hall session", venue: "Katonga Hall" },
+    conference,
+    registration,
+  })
+  assert.match(session.subject, /Katonga Hall session/)
+  assert.match(session.intro, /Katonga Hall/)
+  assert.equal(session.siteUrl, "https://rec.nrep.ug/")
+})
+
+test("manual badge numbers share REC-YEAR and only change at the end", () => {
+  assert.equal(buildRecBadgeNumber(2026, 1), "REC2026000001")
+  assert.equal(formatRecBadgeNumber("REC2026000001"), "REC-2026-000001")
+  assert.equal(formatRecBadgeNumber("REC2026872587"), "REC-2026-872587")
+  assert.equal(nextRecBadgeSequence(["REC2026000001", "REC2026000002"], 2026), 3)
+  assert.equal(nextRecBadgeSequence(["REC2026872587"], 2026), 1)
+  assert.deepEqual(
+    expandRecBadgeNumberCandidates("87", [2026]),
+    ["87", "REC2026000087"]
+  )
+  assert.deepEqual(
+    expandRecBadgeNumberCandidates("REC-2026-000087", [2026]),
+    ["REC2026000087"]
   )
 })

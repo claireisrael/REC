@@ -22,6 +22,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import { useAuth } from "@/lib/auth/auth-provider"
 import { paginateRecAnalyticsRows } from "@/lib/rec-conference/scanning-analytics.mjs"
+import { formatRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
 
 const emptyOverview = {
   summary: {},
@@ -1155,6 +1156,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                         <h4>Registration</h4>
                         <DetailField label="Type" value={humanize(registration.registrationType)} />
                         <DetailField label="Days" value={formatList(registration.daysAttending)} />
+                        <DetailField label="Additional Sessions" value={formatList(formatRecOptionalSessions(registration.additionalSessions))} />
                         <DetailField label="Conference Years" value={formatList(registration.conferenceYears)} />
                         <DetailField label="Registered" value={formatDateTime(registration.registeredAt)} />
                       </section>

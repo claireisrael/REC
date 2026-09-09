@@ -41,6 +41,50 @@ function playRejectBuzz() {
   playTone(220, 300, "square")
 }
 
+function formatScanTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  return date.toLocaleString("en-UG", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+    timeZone: "Africa/Kampala",
+  })
+}
+
+function resultLabel(status) {
+  if (status === "accepted") return "Accepted"
+  if (status === "duplicate") return "Already scanned"
+  if (status === "rejected") return "Rejected"
+  return status || "Unknown"
+}
+
+function resultClass(status) {
+  if (status === "accepted") return "bg-emerald-500/20 text-emerald-200"
+  if (status === "duplicate") return "bg-amber-400/20 text-amber-200"
+  return "bg-red-500/20 text-red-200"
+}
+
+function scanRowFromPayload(payload, fallbackMessage = "") {
+  const status = payload?.status === "duplicate"
+    ? "duplicate"
+    : payload?.status === "accepted"
+      ? "accepted"
+      : "rejected"
+  return {
+    id: payload?.scan?.$id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    scannedAt: payload?.scan?.scannedAt || payload?.scannedAt || new Date().toISOString(),
+    name: payload?.registration?.name || "Unknown registrant",
+    email: payload?.registration?.email || "",
+    organization: payload?.registration?.organization || "",
+    eventName: payload?.event?.name || payload?.scanType || "",
+    venue: payload?.event?.venue || payload?.deployedLocation || "",
+    status,
+    note: payload?.reason && payload.reason !== "ok"
+      ? String(payload.reason).replaceAll("_", " ")
+      : (status === "rejected" ? (payload?.error || fallbackMessage) : ""),
+  }
+}
+
 export default function RecScannerPage() {
   const inputRef = useRef(null)
   const bufferRef = useRef("")
@@ -52,6 +96,7 @@ export default function RecScannerPage() {
   const [handshakeError, setHandshakeError] = useState("")
   const [loadingStation, setLoadingStation] = useState(false)
   const [feedback, setFeedback] = useState(null)
+  const [scanRows, setScanRows] = useState([])
 
   const focusCapture = useCallback(() => {
     inputRef.current?.focus()
@@ -97,6 +142,12 @@ export default function RecScannerPage() {
         body: JSON.stringify({ serialNumber, qrData }),
       })
       const payload = await response.json().catch(() => ({}))
+      const row = scanRowFromPayload(
+        payload,
+        payload.error || payload.code || "SCAN REJECTED"
+      )
+      setScanRows((previous) => [row, ...previous].slice(0, 200))
+
       if (response.ok) {
         const isDuplicate = payload.status === "duplicate"
         playSuccessBeep()
@@ -117,10 +168,11 @@ export default function RecScannerPage() {
       }
     } catch {
       playRejectBuzz()
+      const row = scanRowFromPayload({}, "SCAN REJECTED")
+      setScanRows((previous) => [row, ...previous].slice(0, 200))
       setFeedback({ kind: "error", message: "SCAN REJECTED" })
     } finally {
       submittingRef.current = false
-      window.setTimeout(() => setFeedback(null), 2200)
       focusCapture()
     }
   }, [focusCapture, serialNumber])
@@ -183,12 +235,14 @@ export default function RecScannerPage() {
     setSerialNumber("")
     setAllocation(null)
     setFeedback(null)
+    setScanRows([])
     setHandshakeError("")
     window.sessionStorage.removeItem(STATION_STORAGE_KEY)
     focusCapture()
   }
 
   const locked = !serialNumber
+  const acceptedCount = scanRows.filter((row) => row.status === "accepted").length
 
   return (
     <div
@@ -250,55 +304,87 @@ export default function RecScannerPage() {
             </button>
           </header>
 
-          <main className="relative flex flex-1 items-center justify-center px-6 py-10">
-            {!feedback && (
-              <p className="text-center text-3xl font-bold text-slate-300 md:text-5xl">
-                Ready for badge QR / barcode
+          {feedback && (
+            <div
+              className={`px-6 py-4 text-center ${
+                feedback.kind === "ok"
+                  ? "bg-emerald-600"
+                  : feedback.kind === "duplicate"
+                    ? "bg-amber-400 text-amber-950"
+                    : "bg-red-700"
+              }`}
+            >
+              <p className="text-2xl font-black md:text-4xl">{feedback.message}</p>
+              {(feedback.registrantName || feedback.scanType) && (
+                <p className="mt-1 text-base font-semibold">
+                  {[feedback.registrantName, feedback.registrantOrg, feedback.scanType].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              {feedback.hopperDetected && (
+                <p className="mt-2 text-sm font-black uppercase tracking-wide">
+                  Hopper detected — hall change flagged
+                </p>
+              )}
+            </div>
+          )}
+
+          <main className="flex flex-1 flex-col gap-4 px-4 py-6 md:px-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black md:text-2xl">Scanned attendees</h2>
+                <p className="text-sm text-slate-400">
+                  Keep this page focused. The Tera types the badge code and sends Enter, then the row is added here.
+                </p>
+              </div>
+              <p className="rounded-full bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200">
+                {acceptedCount} accepted · {scanRows.length} recorded this session
               </p>
-            )}
+            </div>
 
-            {feedback?.kind === "ok" && (
-              <div className="w-full max-w-3xl rounded-3xl bg-emerald-500 px-8 py-12 text-center shadow-2xl">
-                <p className="text-5xl font-black md:text-7xl">✅ SCANNED OK</p>
-                {feedback.registrantName && (
-                  <p className="mt-6 text-3xl font-black">{feedback.registrantName}</p>
-                )}
-                {feedback.registrantOrg && (
-                  <p className="mt-2 text-lg font-semibold">{feedback.registrantOrg}</p>
-                )}
-                {feedback.scanType && (
-                  <p className="mt-4 text-xl font-semibold uppercase tracking-wide">
-                    {String(feedback.scanType).replaceAll("_", " ")}
-                  </p>
-                )}
-                {feedback.hopperDetected && (
-                  <div className="mt-6 rounded-2xl bg-amber-300 px-5 py-4 text-2xl font-black text-amber-950">
-                    Hopper detected — hall change flagged
-                  </div>
-                )}
-              </div>
-            )}
-
-            {feedback?.kind === "duplicate" && (
-              <div className="w-full max-w-3xl rounded-3xl bg-amber-400 px-8 py-12 text-center text-amber-950 shadow-2xl">
-                <p className="text-5xl font-black md:text-7xl">ALREADY SCANNED</p>
-                {feedback.registrantName && (
-                  <p className="mt-6 text-3xl font-black">{feedback.registrantName}</p>
-                )}
-                {feedback.scanType && (
-                  <p className="mt-4 text-xl font-semibold uppercase tracking-wide">
-                    {String(feedback.scanType).replaceAll("_", " ")}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {feedback?.kind === "error" && (
-              <div className="w-full max-w-3xl rounded-3xl bg-red-700 px-8 py-12 text-center shadow-2xl">
-                <p className="text-5xl font-black md:text-7xl">🛑 SCAN REJECTED</p>
-                <p className="mt-6 text-2xl font-bold tracking-wide">{feedback.message}</p>
-              </div>
-            )}
+            <div className="overflow-auto rounded-2xl border border-slate-800 bg-slate-900">
+              <table className="min-w-full text-left text-sm">
+                <thead className="sticky top-0 bg-slate-800 text-xs uppercase tracking-wide text-slate-300">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Time</th>
+                    <th className="px-4 py-3 font-semibold">Registrant</th>
+                    <th className="px-4 py-3 font-semibold">Organization</th>
+                    <th className="px-4 py-3 font-semibold">Event</th>
+                    <th className="px-4 py-3 font-semibold">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scanRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-16 text-center text-slate-400">
+                        Ready for badge QR / barcode. Each successful or rejected scan appears as a new row.
+                      </td>
+                    </tr>
+                  ) : scanRows.map((row, index) => (
+                    <tr
+                      key={row.id}
+                      className={`border-t border-slate-800 ${index === 0 ? "bg-slate-800/60" : ""}`}
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-300">{formatScanTime(row.scannedAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-white">{row.name}</div>
+                        {row.email && <div className="text-xs text-slate-400">{row.email}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-200">{row.organization || "—"}</td>
+                      <td className="px-4 py-3">
+                        <div className="text-slate-100">{row.eventName || "—"}</div>
+                        {row.venue && <div className="text-xs text-slate-400">{row.venue}</div>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${resultClass(row.status)}`}>
+                          {resultLabel(row.status)}
+                        </span>
+                        {row.note && <div className="mt-1 text-xs capitalize text-slate-400">{row.note}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </main>
         </div>
       )}

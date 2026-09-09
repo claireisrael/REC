@@ -7,6 +7,10 @@ import "react-phone-input-2/lib/style.css"
 import countries from "world-countries"
 import { validateEmail } from "@/lib/utils/validation"
 import { formatAppwriteDate } from "@/lib/utils"
+import {
+  REC_OPTIONAL_SESSIONS,
+  normalizeRecOptionalSessions,
+} from "@/lib/rec-conference/registration-tracks.mjs"
 
 const titleOptions = ["Dr.", "Mr.", "Ms.", "Mrs.", "Rev.", "Prof.", "Eng.", "Prof.Eng."]
 const sectorOptions = ["Public", "Private", "Civil Society Organization", "Academia", "Other"]
@@ -36,6 +40,7 @@ const emptyFormData = {
   passportNumber: "",
   additionalComments: "",
   exhibitionDetails: "",
+  additionalSessions: [],
   coupon: "",
   sponsorOrganization: "",
   sponsorSector: "",
@@ -63,6 +68,7 @@ const buildFormData = (source = {}, { includeSponsorship = true } = {}) => ({
   passportNumber: source.passportNumber || "",
   additionalComments: source.additionalComments || "",
   exhibitionDetails: source.exhibitionDetails || "",
+  additionalSessions: normalizeRecOptionalSessions(source.additionalSessions),
   coupon: includeSponsorship ? source.coupon || "" : "",
   sponsorOrganization: includeSponsorship ? source.sponsorOrganization || "" : "",
   sponsorSector: includeSponsorship ? source.sponsorSector || "" : "",
@@ -152,6 +158,15 @@ export default function AdminRegistrationForm({
         : [...prev.daysAttending, label]
 
       return { ...prev, daysAttending }
+    })
+  }
+
+  const handleOptionalSessionChange = (sessionValue) => {
+    setFormData((prev) => {
+      const additionalSessions = prev.additionalSessions.includes(sessionValue)
+        ? prev.additionalSessions.filter((value) => value !== sessionValue)
+        : [...prev.additionalSessions, sessionValue]
+      return { ...prev, additionalSessions }
     })
   }
 
@@ -456,6 +471,25 @@ export default function AdminRegistrationForm({
                 This conference does not have days configured yet.
               </Alert>
             )}
+          </Form.Group>
+
+          <Form.Group className="mb-3">
+            <Form.Label>Optional additional sessions</Form.Label>
+            <p className="text-muted small mb-2">
+              Not required. Select only if this person will also attend the Business Forum / Marketplace.
+            </p>
+            <div className="d-flex flex-column gap-2">
+              {REC_OPTIONAL_SESSIONS.map((session) => (
+                <Form.Check
+                  key={session.value}
+                  type="checkbox"
+                  id={`admin-optional-session-${session.value}`}
+                  label={session.label}
+                  checked={formData.additionalSessions.includes(session.value)}
+                  onChange={() => handleOptionalSessionChange(session.value)}
+                />
+              ))}
+            </div>
           </Form.Group>
 
           <Row>

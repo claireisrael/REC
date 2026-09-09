@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Query } from "appwrite"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAppwrite } from "@/lib/appwrite/provider"
+import { formatRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
 import {
   deleteRecRegistration,
   getRecRegistrationsByYear,
@@ -414,6 +415,7 @@ export default function RecRegistrationsList() {
         "Coupon Code",
         "Registration Type",
         "Days Attending",
+        "Additional Sessions",
         "Country",
         "Phone",
         "Visa Letter Required",
@@ -431,6 +433,7 @@ export default function RecRegistrationsList() {
         registration.coupon,
         registration.registrationType,
         Array.isArray(registration.daysAttending) ? registration.daysAttending.join(", ") : "",
+        formatRecOptionalSessions(registration.additionalSessions).join(", "),
         registration.country,
         registration.phone,
         registration.visaLetterRequired ? "Yes" : "No",
@@ -753,6 +756,9 @@ export default function RecRegistrationsList() {
                             <span className="rec-chip">+{registration.daysAttending.length - 2}</span>
                           )}
                           {!registration.daysAttending?.length && <span className="rec-muted">No days</span>}
+                          {formatRecOptionalSessions(registration.additionalSessions).map((session) => (
+                            <span key={session} className="rec-chip">{session}</span>
+                          ))}
                         </div>
                       </td>
                       <td data-label="Visa">
@@ -968,6 +974,7 @@ function RegistrationDetails({ registration, selectedYear }) {
         <DetailField label="Selected Year" value={`REC ${selectedYear}`} />
         <DetailField label="Conference Years" value={Array.isArray(registration.conferenceYears) ? registration.conferenceYears.join(", ") : ""} />
         <DetailField label="Days Attending" value={Array.isArray(registration.daysAttending) ? registration.daysAttending.join(", ") : ""} />
+        <DetailField label="Additional Sessions" value={formatRecOptionalSessions(registration.additionalSessions).join(", ") || "None selected"} />
         {registration.registrationType === "Exhibitor" && (
           <DetailField label="Exhibition Details" value={registration.exhibitionDetails} />
         )}
