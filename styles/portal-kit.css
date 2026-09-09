@@ -1,0 +1,171 @@
+/* Interaction styles for the portal-native components in components/ui/portal-kit.js. */
+
+.portal-alert-close,
+.portal-modal-close,
+.portal-toast-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 0;
+}
+
+.portal-alert-close {
+  border-radius: 4px;
+  height: 30px;
+  position: absolute;
+  right: 10px;
+  top: 9px;
+  width: 30px;
+}
+
+.portal-modal-close,
+.portal-toast-close {
+  border-radius: 4px;
+  height: 32px;
+  margin-left: auto;
+  width: 32px;
+}
+
+.portal-alert-close:hover,
+.portal-modal-close:hover,
+.portal-toast-close:hover {
+  background: rgb(23 111 145 / 10%);
+  color: var(--nrep-primary-dark);
+}
+
+.portal-alert-close:focus-visible,
+.portal-modal-close:focus-visible,
+.portal-toast-close:focus-visible,
+.portal-breadcrumb-button:focus-visible {
+  box-shadow: 0 0 0 3px rgb(46 158 204 / 28%);
+  outline: 2px solid var(--nrep-primary);
+  outline-offset: 1px;
+}
+
+.portal-modal {
+  overflow-x: hidden;
+  overflow-y: auto;
+  z-index: 1055;
+}
+
+.portal-modal-backdrop {
+  z-index: 1050;
+}
+
+.portal-modal .modal-dialog:focus {
+  outline: none;
+}
+
+.portal-modal .modal-content {
+  background: var(--nrep-surface);
+  border: 1px solid var(--nrep-border);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgb(15 35 45 / 22%);
+  color: var(--nrep-text);
+  overflow: hidden;
+}
+
+.portal-modal .modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.portal-modal .modal-header,
+.portal-modal .modal-footer {
+  border-color: var(--nrep-border);
+}
+
+.portal-breadcrumb-button {
+  background: transparent;
+  border: 0;
+  color: var(--nrep-primary-dark);
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.portal-breadcrumb-button:hover {
+  color: var(--nrep-primary);
+  text-decoration-color: currentColor;
+}
+
+.portal-tabs > .tab-content > .tab-pane[hidden],
+.tab-content > .tab-pane[hidden] {
+  display: none !important;
+}
+
+.portal-tabs > .nav-tabs {
+  border-bottom-color: var(--nrep-border);
+}
+
+.portal-tabs > .nav-tabs .nav-link {
+  color: var(--nrep-text-muted);
+}
+
+.portal-tabs > .nav-tabs .nav-link:hover {
+  border-color: var(--nrep-border) var(--nrep-border) transparent;
+  color: var(--nrep-primary-dark);
+}
+
+.portal-tabs > .nav-tabs .nav-link.active {
+  background: var(--nrep-surface);
+  border-color: var(--nrep-border) var(--nrep-border) var(--nrep-surface);
+  color: var(--nrep-primary-dark);
+  font-weight: 700;
+}
+
+.portal-progress-bar {
+  background-color: var(--nrep-primary);
+}
+
+.portal-pagination .page-item.active .page-link {
+  background-color: var(--nrep-primary);
+  border-color: var(--nrep-primary);
+  color: #fff;
+}
+
+.portal-pagination .page-link {
+  color: var(--nrep-primary-dark);
+}
+
+.portal-pagination .page-link:hover {
+  background-color: rgb(23 111 145 / 8%);
+  border-color: var(--nrep-primary-light);
+  color: var(--nrep-primary-dark);
+}
+
+.dropdown > .dropdown-menu {
+  max-width: min(22rem, calc(100vw - 2rem));
+  z-index: 1080;
+}
+
+.toast-container.position-fixed {
+  max-width: min(24rem, calc(100vw - 1rem));
+  z-index: 1090;
+}
+
+.toast-container .toast {
+  max-width: 100%;
+}
+
+@media (max-width: 575.98px) {
+  .portal-modal .modal-dialog:not(.modal-fullscreen) {
+    margin: 0.75rem;
+    max-width: calc(100% - 1.5rem);
+  }
+
+  .portal-modal .modal-body,
+  .portal-modal .modal-header,
+  .portal-modal .modal-footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}

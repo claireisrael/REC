@@ -1,0 +1,173 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import {
+  buildRecScanAnalytics,
+  buildRecScanLogRows,
+  buildRecScanRegistrantRows,
+  filterRecScanLogRows,
+  filterRecScanRegistrantRows,
+  paginateRecAnalyticsRows,
+  rowsToRecAnalyticsCsv,
+} from "../lib/rec-conference/scanning-analytics.mjs"
+
+const conference = {
+  year: 2026,
+  days: [
+    { label: "Day 1", date: "2026-10-19" },
+    { label: "Day 2", date: "2026-10-20" },
+  ],
+}
+
+const events = [
+  {
+    $id: "entry-day-1",
+    name: "Main Entrance - Day 1",
+    type: "conference_entry",
+    day: 1,
+    isActive: true,
+    allowedRegistrationTypes: [],
+    allowedDaysAttending: [],
+  },
+  {
+    $id: "lunch-day-2",
+    name: "Lunch - Day 2",
+    type: "lunch",
+    day: 2,
+    isActive: true,
+    allowedRegistrationTypes: ["Delegate"],
+    allowedDaysAttending: ["Day 2"],
+  },
+]
+
+const registrations = [
+  {
+    $id: "reg-1",
+    title: "Dr",
+    firstName: "Amina",
+    lastName: "Nabirye",
+    email: "amina@example.test",
+    organization: "NREP",
+    registrationType: "Delegate",
+    country: "Uganda",
+    daysAttending: ["Day 1", "Day 2"],
+  },
+  {
+    $id: "reg-2",
+    firstName: "Peter",
+    lastName: "Okello",
+    email: "peter@example.test",
+    organization: "Solar Co",
+    registrationType: "Exhibitor",
+    country: "Kenya",
+    daysAttending: ["Day 1"],
+  },
+]
+
+const scans = [
+  {
+    $id: "scan-1",
+    registrationId: "reg-1",
+    registrationEmail: "amina@example.test",
+    eventId: "entry-day-1",
+    scanType: "conference_entry",
+    status: "accepted",
+    resultReason: "ok",
+    scannedBy: "scanner:one",
+    scannerName: "Entrance Team",
+    scannedAt: "2026-10-19T05:30:00.000Z",
+    registrationDaysAttending: ["Day 1", "Day 2"],
+    matchedAttendanceDays: ["Day 1"],
+  },
+  {
+    $id: "scan-2",
+    registrationId: "reg-1",
+    registrationEmail: "amina@example.test",
+    eventId: "lunch-day-2",
+    scanType: "lunch",
+    status: "accepted",
+    resultReason: "ok",
+    scannedBy: "scanner:two",
+    scannerName: "Lunch Team",
+    scannedAt: "2026-10-20T09:00:00.000Z",
+    registrationDaysAttending: ["Day 1", "Day 2"],
+    matchedAttendanceDays: ["Day 2"],
+  },
+  {
+    $id: "scan-3",
+    registrationId: "reg-2",
+    registrationEmail: "peter@example.test",
+    eventId: "lunch-day-2",
+    scanType: "lunch",
+    status: "rejected",
+    resultReason: "registration_day_not_allowed",
+    scannedBy: "scanner:two",
+    scannerName: "Lunch Team",
+    scannedAt: "2026-10-20T09:05:00.000Z",
+    registrationDaysAttending: ["Day 1"],
+    matchedAttendanceDays: [],
+  },
+]
+
+test("scanner analytics report exact coverage, event eligibility, operators, and rejection reasons", () => {
+  const analytics = buildRecScanAnalytics({ scans, registrations, events, conference })
+
+  assert.deepEqual(analytics.summary, {
+    totalScanRecords: 3,
+    acceptedScans: 2,
+    rejectedScans: 1,
+    duplicateScans: 0,
+    uniqueAttendees: 1,
+    registeredAttendees: 2,
+    notYetScanned: 1,
+    attendanceRate: 50,
+    acceptanceRate: 66.7,
+    configuredEvents: 2,
+    activeEvents: 2,
+  })
+  assert.equal(analytics.byEvent.find((event) => event.eventId === "lunch-day-2").eligibleRegistrants, 1)
+  assert.equal(analytics.byEvent.find((event) => event.eventId === "lunch-day-2").attendanceRate, 100)
+  assert.equal(analytics.byScanner.find((scanner) => scanner.key === "scanner:two").total, 2)
+  assert.equal(analytics.rejectionReasons[0].key, "registration_day_not_allowed")
+  assert.equal(analytics.timeline.length, 2)
+})
+
+test("registrant attendance rows are searchable and filterable", () => {
+  const rows = buildRecScanRegistrantRows({ registrations, scans, events })
+  const amina = rows.find((row) => row.registrationId === "reg-1")
+  assert.equal(amina.name, "Dr Amina Nabirye")
+  assert.equal(amina.eventCount, 2)
+  assert.equal(amina.acceptedScans, 2)
+  assert.deepEqual(filterRecScanRegistrantRows(rows, { attendance: "not_scanned" }).map((row) => row.registrationId), ["reg-2"])
+  assert.deepEqual(filterRecScanRegistrantRows(rows, { search: "solar" }).map((row) => row.registrationId), ["reg-2"])
+})
+
+test("scan log rows resolve registrant and event names and support filters", () => {
+  const rows = buildRecScanLogRows({ scans, registrations, events })
+  assert.equal(rows[0].scanId, "scan-3")
+  assert.equal(rows[0].registrantName, "Peter Okello")
+  assert.equal(rows[0].eventName, "Lunch - Day 2")
+  assert.equal(filterRecScanLogRows(rows, { status: "rejected" }).length, 1)
+  assert.equal(filterRecScanLogRows(rows, { scanner: "scanner:one" }).length, 1)
+})
+
+test("analytics CSV output neutralizes spreadsheet formulas", () => {
+  const csv = rowsToRecAnalyticsCsv(
+    [{ key: "name", label: "Name" }, { key: "organization", label: "Organization" }],
+    [{ name: "=HYPERLINK(\"bad\")", organization: "NREP, Uganda" }]
+  )
+  assert.match(csv, /^Name,Organization\r\n"'/)
+  assert.match(csv, /"NREP, Uganda"/)
+})
+
+test("analytics pagination bounds pages and preserves report totals", () => {
+  const rows = Array.from({ length: 23 }, (_, index) => ({ id: index + 1 }))
+
+  const secondPage = paginateRecAnalyticsRows(rows, 2, 10)
+  assert.deepEqual(secondPage.documents.map((row) => row.id), [11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
+  assert.equal(secondPage.total, 23)
+  assert.equal(secondPage.totalPages, 3)
+
+  const boundedPage = paginateRecAnalyticsRows(rows, 99, 10)
+  assert.equal(boundedPage.page, 3)
+  assert.deepEqual(boundedPage.documents.map((row) => row.id), [21, 22, 23])
+})
