@@ -30,6 +30,7 @@ import {
   faTicket,
 } from "@fortawesome/free-solid-svg-icons"
 import { formatAppwriteDate } from "@/lib/utils"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 
 const sectorOptions = [
   "Public",
@@ -486,7 +487,7 @@ export default function RecCouponsManager() {
                 <option value="">All Conferences</option>
                 {conferences.map((conference) => (
                   <option key={conference.$id || conference.year} value={conference.year}>
-                    REC {conference.year} {conference.isActive ? "(Active)" : ""}
+                    {formatRecEdition(conference.year)} {conference.isActive ? "(Active)" : ""}
                   </option>
                 ))}
               </select>
@@ -606,7 +607,7 @@ export default function RecCouponsManager() {
                             <span style={{ width: `${usagePercent}%` }} />
                           </div>
                         </td>
-                        <td data-label="Conference">REC {coupon.conference}</td>
+                        <td data-label="Conference">{formatRecEdition(coupon.conference)}</td>
                         <td data-label="Status">
                           <span className={`rec-status ${status.className}`}>{status.label}</span>
                         </td>
@@ -781,7 +782,7 @@ function CouponForm({ id, formData, conferences, creating, onSubmit, onChange, o
             <option value="">Select Conference</option>
             {conferences.map((conference) => (
               <option key={conference.$id || conference.year} value={conference.year}>
-                REC {conference.year} {conference.isActive ? "(Active)" : ""}
+                {formatRecEdition(conference.year)} {conference.isActive ? "(Active)" : ""}
               </option>
             ))}
           </select>
@@ -913,7 +914,7 @@ function CouponAnalytics({ analytics, conference }) {
   return (
     <div>
       <p className="rec-muted">
-        Showing analytics for {conference ? `REC ${conference}` : "all conferences"}.
+        Showing analytics for {conference ? formatRecEdition(conference) : "all conferences"}.
       </p>
       <div className="rec-stats-grid rec-stats-grid-four mb-3">
         <div className="rec-stat-tile"><span className="rec-stat-number">{analytics.total}</span><span className="rec-stat-label">Coupons</span></div>

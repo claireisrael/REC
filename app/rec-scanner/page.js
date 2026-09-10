@@ -1,12 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import QRCode from "qrcode"
 import {
   HID_KEYSTROKE_WINDOW_MS,
   HID_SCAN_CODES,
-  REC_TERA_HW0009_SERIALS,
+  REC_TERA_HW0009_DEPLOYMENTS,
   isTeraHardwareSerial,
 } from "@/lib/rec-conference/scanning-rules.mjs"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import "./rec-scanner-station.css"
 
 const STATION_STORAGE_KEY = "rec.tera.station.serial"
 
@@ -59,9 +62,35 @@ function resultLabel(status) {
 }
 
 function resultClass(status) {
-  if (status === "accepted") return "bg-emerald-500/20 text-emerald-200"
-  if (status === "duplicate") return "bg-amber-400/20 text-amber-200"
-  return "bg-red-500/20 text-red-200"
+  if (status === "accepted") return "rec-station-pill rec-station-pill-ok"
+  if (status === "duplicate") return "rec-station-pill rec-station-pill-duplicate"
+  return "rec-station-pill rec-station-pill-error"
+}
+
+function formatClock(value = new Date()) {
+  return value.toLocaleString("en-UG", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Africa/Kampala",
+  })
+}
+
+function UnlockCard({ unit, kind = "hall" }) {
+  return (
+    <article className={`rec-station-card${kind === "gate" ? " rec-station-card-gate" : ""}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        alt={`${unit.deployedLocation} serial ${unit.serialNumber}`}
+        src={unit.qrDataUrl}
+      />
+      <strong>{unit.deployedLocation}</strong>
+      <em>{kind === "gate" ? "Main entrance" : "Hall scanner"}</em>
+      <code>{unit.serialNumber}</code>
+    </article>
+  )
 }
 
 function scanRowFromPayload(payload, fallbackMessage = "") {
@@ -78,6 +107,8 @@ function scanRowFromPayload(payload, fallbackMessage = "") {
     organization: payload?.registration?.organization || "",
     eventName: payload?.event?.name || payload?.scanType || "",
     venue: payload?.event?.venue || payload?.deployedLocation || "",
+    categoryTag: payload?.registration?.participantCategoryTag || "",
+    categoryDirection: payload?.registration?.participantCategoryDirection || "",
     status,
     note: payload?.reason && payload.reason !== "ok"
       ? String(payload.reason).replaceAll("_", " ")
@@ -97,6 +128,8 @@ export default function RecScannerPage() {
   const [loadingStation, setLoadingStation] = useState(false)
   const [feedback, setFeedback] = useState(null)
   const [scanRows, setScanRows] = useState([])
+  const [unlockCodes, setUnlockCodes] = useState([])
+  const [clock, setClock] = useState("")
 
   const focusCapture = useCallback(() => {
     inputRef.current?.focus()
@@ -158,6 +191,8 @@ export default function RecScannerPage() {
           scanType: payload.event?.name || payload.scanType || "",
           registrantName: payload.registration?.name || "",
           registrantOrg: payload.registration?.organization || "",
+          categoryTag: payload.registration?.participantCategoryTag || "",
+          categoryDirection: payload.registration?.participantCategoryDirection || "",
         })
       } else {
         playRejectBuzz()
@@ -194,6 +229,33 @@ export default function RecScannerPage() {
 
     submitScan(scanned)
   }, [serialNumber, submitScan, unlockStation])
+
+  useEffect(() => {
+    const tick = () => setClock(formatClock())
+    tick()
+    const timer = window.setInterval(tick, 15000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      REC_TERA_HW0009_DEPLOYMENTS.map(async (unit) => ({
+        ...unit,
+        qrDataUrl: await QRCode.toDataURL(unit.serialNumber, {
+          margin: 1,
+          width: 220,
+          errorCorrectionLevel: "M",
+          color: { dark: "#102a43", light: "#ffffff" },
+        }),
+      }))
+    ).then((codes) => {
+      if (!cancelled) setUnlockCodes(codes)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const stored = window.sessionStorage.getItem(STATION_STORAGE_KEY)
@@ -243,142 +305,205 @@ export default function RecScannerPage() {
 
   const locked = !serialNumber
   const acceptedCount = scanRows.filter((row) => row.status === "accepted").length
+  const hallUnits = unlockCodes.filter((unit) => unit.assignedRole !== "Main Gate")
+  const gateUnits = unlockCodes.filter((unit) => unit.assignedRole === "Main Gate")
+  const statusClass = handshakeError
+    ? "rec-station-status rec-station-status-error"
+    : loadingStation
+      ? "rec-station-status rec-station-status-load"
+      : "rec-station-status rec-station-status-wait"
+  const resultKind = feedback?.kind === "ok"
+    ? "ok"
+    : feedback?.kind === "duplicate"
+      ? "duplicate"
+      : feedback
+        ? "error"
+        : "idle"
 
   return (
-    <div
-      id="rec-tera-station"
-      className="flex min-h-screen flex-col bg-slate-950 text-white"
-      onClick={focusCapture}
-    >
+    <div id="rec-tera-station" className="rec-station" onClick={focusCapture}>
       <input
         ref={inputRef}
         aria-label="HID scanner capture"
         autoComplete="off"
         autoFocus
-        className="pointer-events-none absolute h-0 w-0 opacity-0"
+        className="rec-station-input"
         inputMode="none"
         onBlur={focusCapture}
         readOnly
       />
 
       {locked ? (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-          <p className="text-6xl font-black tracking-tight md:text-8xl">🔒 STATION LOCKED</p>
-          <p className="max-w-2xl text-lg text-slate-300 md:text-2xl">
-            Scan this Tera HW0009 serial barcode to unlock the station.
-          </p>
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-500">
-            Fleet {REC_TERA_HW0009_SERIALS.length} units
-          </p>
-          {loadingStation && <p className="text-amber-300">Authorizing device…</p>}
-          {handshakeError && (
-            <div className="rounded-2xl bg-red-700 px-8 py-5 text-2xl font-black">
-              🛑 SCAN REJECTED
-              <div className="mt-2 text-lg font-semibold">{handshakeError}</div>
+        <>
+          <header className="rec-station-top">
+            <div className="rec-station-brand">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/badge/ministry.jpeg" alt="Ministry of Energy and Mineral Development" />
+              <div>
+                <span>{formatRecEdition(2026)} &amp; Expo</span>
+                <strong>Tera scanner station</strong>
+              </div>
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex min-h-screen flex-col">
-          <header className="flex items-center justify-between gap-4 bg-cyan-700 px-6 py-5">
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-cyan-100">Active unit location</p>
-              <h1 className="text-3xl font-black md:text-5xl">
-                {allocation?.deployedLocation || "Location pending"}
-              </h1>
-              <p className="mt-1 text-sm text-cyan-100">
-                {allocation?.assignedRole || "Assigned role pending"} · SN {serialNumber}
-              </p>
-              {allocation?.openEvents?.[0] && (
-                <p className="mt-2 text-base font-semibold text-white">
-                  Event: {allocation.openEvents[0].name}
-                </p>
-              )}
+            <div className="rec-station-meta">
+              <span className="rec-station-chip">Fleet {REC_TERA_HW0009_DEPLOYMENTS.length}</span>
+              {clock && <span className="rec-station-clock">{clock}</span>}
             </div>
-            <button
-              className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold uppercase tracking-wide text-white"
-              onClick={lockStation}
-              type="button"
-            >
-              Lock station
-            </button>
           </header>
 
-          {feedback && (
-            <div
-              className={`px-6 py-4 text-center ${
-                feedback.kind === "ok"
-                  ? "bg-emerald-600"
-                  : feedback.kind === "duplicate"
-                    ? "bg-amber-400 text-amber-950"
-                    : "bg-red-700"
-              }`}
-            >
-              <p className="text-2xl font-black md:text-4xl">{feedback.message}</p>
-              {(feedback.registrantName || feedback.scanType) && (
-                <p className="mt-1 text-base font-semibold">
-                  {[feedback.registrantName, feedback.registrantOrg, feedback.scanType].filter(Boolean).join(" · ")}
-                </p>
-              )}
-              {feedback.hopperDetected && (
-                <p className="mt-2 text-sm font-black uppercase tracking-wide">
-                  Hopper detected — hall change flagged
-                </p>
-              )}
-            </div>
-          )}
+          <section className="rec-station-hero">
+            <p className="rec-station-kicker">Station locked</p>
+            <h1>Unlock the Tera in your hand</h1>
+            <p>
+              Plug that one gun into this laptop, then point it at the matching QR on this screen.
+              Do not use a second Tera.
+            </p>
+          </section>
 
-          <main className="flex flex-1 flex-col gap-4 px-4 py-6 md:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="rec-station-steps">
+            <div className="rec-station-step">
+              <b>1</b>
               <div>
-                <h2 className="text-xl font-black md:text-2xl">Scanned attendees</h2>
-                <p className="text-sm text-slate-400">
-                  Keep this page focused. The Tera types the badge code and sends Enter, then the row is added here.
-                </p>
+                <span>Plug in</span>
+                <small>Connect the Tera you are holding to this laptop.</small>
               </div>
-              <p className="rounded-full bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200">
-                {acceptedCount} accepted · {scanRows.length} recorded this session
-              </p>
+            </div>
+            <div className="rec-station-step">
+              <b>2</b>
+              <div>
+                <span>Scan this screen</span>
+                <small>Point it at the QR with the same serial as that gun.</small>
+              </div>
+            </div>
+            <div className="rec-station-step">
+              <b>3</b>
+              <div>
+                <span>Scan badges</span>
+                <small>After unlock, scan the attendee badge QR.</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="rec-station-board">
+            <section className="rec-station-section">
+              <h2>Hall scanners</h2>
+              <div className="rec-station-grid">
+                {hallUnits.map((unit) => (
+                  <UnlockCard key={unit.serialNumber} unit={unit} />
+                ))}
+              </div>
+            </section>
+            <section className="rec-station-section">
+              <h2>Main entrance</h2>
+              <div className="rec-station-grid">
+                {gateUnits.map((unit) => (
+                  <UnlockCard key={unit.serialNumber} unit={unit} kind="gate" />
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <div className={statusClass}>
+            {handshakeError
+              ? handshakeError
+              : loadingStation
+                ? "Authorizing this Tera…"
+                : "Waiting for a serial QR. Keep this tab focused."}
+          </div>
+        </>
+      ) : (
+        <div className="rec-station-live">
+          <header className="rec-station-live-head">
+            <div>
+              <p>Live station</p>
+              <h1>{allocation?.deployedLocation || "Location pending"}</h1>
+              <span>
+                {allocation?.assignedRole || "Assigned role pending"} · SN {serialNumber}
+                {allocation?.openEvents?.[0] ? ` · ${allocation.openEvents[0].name}` : ""}
+              </span>
+            </div>
+            <div className="rec-station-meta">
+              <span className="rec-station-chip rec-station-chip-live">Unlocked</span>
+              {clock && <span className="rec-station-clock">{clock}</span>}
+              <button className="rec-station-lock-btn" onClick={lockStation} type="button">
+                Lock station
+              </button>
+            </div>
+          </header>
+
+          <div className={`rec-station-result rec-station-result-${resultKind}`}>
+            {feedback ? (
+              <>
+                <strong>{feedback.message}</strong>
+                {(feedback.categoryTag || feedback.registrantName) && (
+                  <b>{feedback.categoryTag || feedback.registrantName}</b>
+                )}
+                <p>
+                  {[
+                    feedback.registrantName && feedback.categoryTag ? feedback.registrantName : "",
+                    feedback.registrantOrg,
+                    feedback.scanType,
+                    feedback.categoryDirection ? `Direct to ${feedback.categoryDirection}` : "",
+                    feedback.hopperDetected ? "Hall change flagged" : "",
+                  ].filter(Boolean).join(" · ")}
+                </p>
+              </>
+            ) : (
+              <>
+                <strong>Ready for badges</strong>
+                <p>Keep this page focused and scan the attendee QR with the same Tera.</p>
+              </>
+            )}
+          </div>
+
+          <main className="rec-station-body">
+            <div className="rec-station-body-top">
+              <div>
+                <h2>This session</h2>
+                <p>Each accepted or rejected scan is added below in Kampala time.</p>
+              </div>
+              <span className="rec-station-chip">
+                {acceptedCount} accepted · {scanRows.length} recorded
+              </span>
             </div>
 
-            <div className="overflow-auto rounded-2xl border border-slate-800 bg-slate-900">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-slate-800 text-xs uppercase tracking-wide text-slate-300">
+            <div className="rec-station-table-wrap">
+              <table className="rec-station-table">
+                <thead>
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Time</th>
-                    <th className="px-4 py-3 font-semibold">Registrant</th>
-                    <th className="px-4 py-3 font-semibold">Organization</th>
-                    <th className="px-4 py-3 font-semibold">Event</th>
-                    <th className="px-4 py-3 font-semibold">Result</th>
+                    <th>Time</th>
+                    <th>Registrant</th>
+                    <th>Category</th>
+                    <th>Organization</th>
+                    <th>Event</th>
+                    <th>Result</th>
                   </tr>
                 </thead>
                 <tbody>
                   {scanRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-16 text-center text-slate-400">
-                        Ready for badge QR / barcode. Each successful or rejected scan appears as a new row.
+                      <td className="rec-station-empty" colSpan={6}>
+                        No scans yet. Point the unlocked Tera at a badge QR.
                       </td>
                     </tr>
-                  ) : scanRows.map((row, index) => (
-                    <tr
-                      key={row.id}
-                      className={`border-t border-slate-800 ${index === 0 ? "bg-slate-800/60" : ""}`}
-                    >
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-300">{formatScanTime(row.scannedAt)}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-white">{row.name}</div>
-                        {row.email && <div className="text-xs text-slate-400">{row.email}</div>}
+                  ) : scanRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatScanTime(row.scannedAt)}</td>
+                      <td>
+                        {row.name}
+                        {row.email && <small>{row.email}</small>}
                       </td>
-                      <td className="px-4 py-3 text-slate-200">{row.organization || "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="text-slate-100">{row.eventName || "—"}</div>
-                        {row.venue && <div className="text-xs text-slate-400">{row.venue}</div>}
+                      <td>
+                        {row.categoryTag || "—"}
+                        {row.categoryDirection && <small>{row.categoryDirection}</small>}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${resultClass(row.status)}`}>
-                          {resultLabel(row.status)}
-                        </span>
-                        {row.note && <div className="mt-1 text-xs capitalize text-slate-400">{row.note}</div>}
+                      <td>{row.organization || "—"}</td>
+                      <td>
+                        {row.eventName || "—"}
+                        {row.venue && <small>{row.venue}</small>}
+                      </td>
+                      <td>
+                        <span className={resultClass(row.status)}>{resultLabel(row.status)}</span>
+                        {row.note && <small>{row.note}</small>}
                       </td>
                     </tr>
                   ))}

@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/rec-conference/admin/media", label: "Media" },
   { href: "/dashboard/rec-conference/admin/reports", label: "Reports" },
   { href: "/dashboard/rec-conference/admin/scanning", label: "Scanning" },
+  { href: "/rec-registration", label: "Public register" },
   { href: "/rec-scanner", label: "Scanner" },
 ]
 

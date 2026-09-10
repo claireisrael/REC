@@ -7,6 +7,7 @@ import {
   REC_2026_SCANNER_HALLS,
   REC_TERA_HW0009_DEPLOYMENTS,
   REC_TERA_HW0009_SERIALS,
+  recPhoneScannerHalls,
   evaluateHidScanRules,
   getRecScanAttendanceEligibility,
   getRecScanEventBulkDeleteValidationError,
@@ -18,6 +19,8 @@ import {
   isTeraHardwareSerial,
   normalizeRecScanEventIds,
   parseHidQrParticipantId,
+  formatTeraScanDeviceLabel,
+  formatTeraScannerName,
   getTeraStationEventTypes,
   hidScanTypeToEventType,
   eventMatchesOperatorRestrictions,
@@ -29,9 +32,13 @@ import {
   resolveTeraOperatorAccess,
   shouldSendRecScanConfirmationEmail,
   getRecScanConfirmationCopy,
+  getRecBadgeViewPath,
+  expandRecBadgeTokenCandidates,
+  recoverRecBadgeTokenFromUrl,
   REC_WEB_APP_URL,
   buildRecBadgeNumber,
   formatRecBadgeNumber,
+  formatRecEdition,
   nextRecBadgeSequence,
   expandRecBadgeNumberCandidates,
 } from "../lib/rec-conference/scanning-rules.mjs"
@@ -216,17 +223,18 @@ test("Tera HW0009 fleet contains the ten registered serials", () => {
   assert.equal(isTeraHardwareSerial("99999999"), false)
 })
 
-test("Tera units are assigned to eight halls plus two main-entrance scanners", () => {
+test("Tera units are assigned to six halls plus four main-entrance scanners", () => {
   const halls = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Hall Steward")
   const entrances = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Main Gate")
   assert.equal(REC_2026_SCANNER_HALLS.length, 8)
-  assert.equal(halls.length, 8)
-  assert.equal(new Set(halls.map((unit) => unit.deployedLocation)).size, 8)
-  assert.equal(entrances.length, 2)
+  assert.equal(halls.length, 6)
+  assert.equal(new Set(halls.map((unit) => unit.deployedLocation)).size, 6)
+  assert.equal(entrances.length, 4)
   assert.equal(entrances.every((unit) => unit.deployedLocation === "Main Entrance"), true)
   assert.equal(REC_TERA_HW0009_DEPLOYMENTS.length, 10)
+  assert.deepEqual(recPhoneScannerHalls(), ["Rwizi", "Kazinga"])
   assert.equal(
-    REC_TERA_HW0009_DEPLOYMENTS.some((unit) => /dining|food court|exhibition/i.test(`${unit.assignedRole} ${unit.deployedLocation}`)),
+    REC_TERA_HW0009_DEPLOYMENTS.some((unit) => /dining|food court|exhibition|rwizi|kazinga/i.test(`${unit.assignedRole} ${unit.deployedLocation}`)),
     false
   )
   for (const unit of halls) {
@@ -362,7 +370,7 @@ test("Tera barcode scanners are registered as operators with a stable device ema
   )
 })
 
-test("Tera scanners inherit the same default access window as phone operators", () => {
+test("Tera scanners start with no access clock until editors set one", () => {
   const conference = {
     startDate: "2026-09-08",
     endDate: "2026-09-10",
@@ -374,14 +382,14 @@ test("Tera scanners inherit the same default access window as phone operators", 
   }
 
   assert.deepEqual(getDefaultScannerAccessWindow(conference), {
-    accessStartsAt: "2026-09-08T08:00:00+03:00",
-    accessEndsAt: "2026-09-10T18:00:00+03:00",
+    accessStartsAt: "",
+    accessEndsAt: "",
     allowedDays: ["1", "2", "3"],
   })
 
   const created = resolveTeraOperatorAccess(null, conference, {})
-  assert.equal(created.accessStartsAt, "2026-09-08T08:00:00+03:00")
-  assert.equal(created.accessEndsAt, "2026-09-10T18:00:00+03:00")
+  assert.equal(created.accessStartsAt, "")
+  assert.equal(created.accessEndsAt, "")
   assert.deepEqual(created.allowedDays, ["1", "2", "3"])
 
   const preserved = resolveTeraOperatorAccess({
@@ -489,7 +497,7 @@ test("scan confirmation emails are sent for accepted non-lunch scans", () => {
 })
 
 test("scan confirmation emails follow the scanned event and link to the REC web app", () => {
-  const conference = { title: "Renewable Energy Conference & Expo 2026", shortName: "REC 2026" }
+  const conference = { year: 2026, title: "Renewable Energy Conference & Expo 2026", shortName: "REC 2026" }
   const registration = { name: "Claire Namagala" }
 
   const entrance = getRecScanConfirmationCopy({
@@ -511,18 +519,76 @@ test("scan confirmation emails follow the scanned event and link to the REC web 
   assert.equal(session.siteUrl, "https://rec.nrep.ug/")
 })
 
-test("manual badge numbers share REC-YEAR and only change at the end", () => {
-  assert.equal(buildRecBadgeNumber(2026, 1), "REC2026000001")
-  assert.equal(formatRecBadgeNumber("REC2026000001"), "REC-2026-000001")
-  assert.equal(formatRecBadgeNumber("REC2026872587"), "REC-2026-872587")
-  assert.equal(nextRecBadgeSequence(["REC2026000001", "REC2026000002"], 2026), 3)
+test("edition labels use REC26, not REC 2026", () => {
+  assert.equal(formatRecEdition(2026), "REC26")
+  assert.equal(formatRecEdition(2025), "REC25")
+  assert.equal(formatRecEdition(2024), "REC24")
+})
+
+test("manual badge numbers share REC26 and only change at the end", () => {
+  assert.equal(buildRecBadgeNumber(2026, 1), "REC26000001")
+  assert.equal(buildRecBadgeNumber(2025, 12), "REC25000012")
+  assert.equal(formatRecBadgeNumber("REC26000001"), "REC26-000001")
+  assert.equal(formatRecBadgeNumber("REC2026872587"), "REC26-872587")
+  assert.equal(nextRecBadgeSequence(["REC26000001", "REC26000002"], 2026), 3)
   assert.equal(nextRecBadgeSequence(["REC2026872587"], 2026), 1)
   assert.deepEqual(
     expandRecBadgeNumberCandidates("87", [2026]),
-    ["87", "REC2026000087"]
+    ["87", "REC26000087", "REC2026000087"]
   )
   assert.deepEqual(
-    expandRecBadgeNumberCandidates("REC-2026-000087", [2026]),
-    ["REC2026000087"]
+    expandRecBadgeNumberCandidates("REC26-000087", [2026]),
+    ["REC26000087"]
+  )
+})
+
+test("Tera scan labels use the operator name and a hall device line", () => {
+  assert.equal(
+    formatTeraScannerName({
+      serialNumber: "01050742",
+      deployedLocation: "Katonga Hall",
+      operatorName: "Tera 01050742 · Katonga Hall",
+    }),
+    "Tera 01050742 · Katonga Hall"
+  )
+  assert.equal(
+    formatTeraScannerName({ serialNumber: "01050742", deployedLocation: "Katonga Hall" }),
+    "Tera 01050742 · Katonga Hall"
+  )
+  assert.equal(
+    formatTeraScanDeviceLabel({ serialNumber: "01050742", deployedLocation: "Katonga Hall" }),
+    "Tera HW0009 · Katonga Hall"
+  )
+})
+
+test("badge open links stay on this app even if the stored URL points at rec.nrep.ug", () => {
+  assert.equal(
+    getRecBadgeViewPath("https://rec.nrep.ug/badge/Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"),
+    "/badge/Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"
+  )
+  assert.equal(getRecBadgeViewPath("/badge/abc123"), "/badge/abc123")
+  assert.equal(getRecBadgeViewPath(""), "")
+})
+
+test("email-mangled badge tokens restore plus, hyphen, and wrapped variants", () => {
+  const spaced = "kCRr A0yaM17ZLT4Bufcp kD__2T4IK2oC7YGA_pROY"
+  const candidates = expandRecBadgeTokenCandidates(spaced)
+  assert.ok(candidates.includes("kCRr+A0yaM17ZLT4Bufcp+kD__2T4IK2oC7YGA_pROY"))
+  assert.ok(candidates.includes("kCRr-A0yaM17ZLT4Bufcp-kD__2T4IK2oC7YGA_pROY"))
+  assert.ok(candidates.includes("kCRrA0yaM17ZLT4BufcpkD__2T4IK2oC7YGA_pROY"))
+  assert.deepEqual(
+    expandRecBadgeTokenCandidates(`http://localhost:3000/badge/${spaced}`),
+    candidates
+  )
+})
+
+test("stored badge URLs recover the original token including plus signs", () => {
+  assert.equal(
+    recoverRecBadgeTokenFromUrl("http://localhost:3000/badge/abc%2Bdef_ghi"),
+    "abc+def_ghi"
+  )
+  assert.equal(
+    recoverRecBadgeTokenFromUrl("https://rec.nrep.ug/badge/Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"),
+    "Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"
   )
 })

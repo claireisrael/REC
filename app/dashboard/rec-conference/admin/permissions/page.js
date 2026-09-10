@@ -31,6 +31,8 @@ export default function RecPermissionsPage() {
   const [selectedPermissionLevel, setSelectedPermissionLevel] = useState("VIEWER")
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [permissionToRemove, setPermissionToRemove] = useState(null)
+  const [removingPermission, setRemovingPermission] = useState(false)
 
   // Check permissions
   const hasRecAccess = hasModuleAccess(MODULES.REC_CONFERENCE)
@@ -151,19 +153,21 @@ export default function RecPermissionsPage() {
   }
 
   const handleDeletePermission = async (permission) => {
-    if (!confirm("Are you sure you want to remove this user's access to REC Conference?")) {
-      return
-    }
-
+    if (!permission?.userId) return
+    setRemovingPermission(true)
+    setError(null)
     try {
       await deleteModulePermission(MODULES.REC_CONFERENCE, permission.userId)
 
-      // Reload permissions
       const response = await fetchModulePermissionUsers(MODULES.REC_CONFERENCE)
       setPermissions(Array.isArray(response.permissions) ? response.permissions : [])
+      setPermissionToRemove(null)
     } catch (err) {
       console.error("Error deleting permission:", err)
       setError("Error removing permission. Please try again.")
+      setPermissionToRemove(null)
+    } finally {
+      setRemovingPermission(false)
     }
   }
 
@@ -297,7 +301,7 @@ export default function RecPermissionsPage() {
                           <Button
                             variant="outline-danger"
                             size="sm"
-                            onClick={() => handleDeletePermission(permission)}
+                            onClick={() => setPermissionToRemove(permission)}
                           >
                             <FontAwesomeIcon icon={faTrash} />
                           </Button>
@@ -396,6 +400,50 @@ export default function RecPermissionsPage() {
                 <FontAwesomeIcon icon={faUserShield} className="me-2" />
                 {editingPermission ? "Update Permission" : "Add Permission"}
               </>
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal
+        show={Boolean(permissionToRemove)}
+        onHide={() => {
+          if (removingPermission) return
+          setPermissionToRemove(null)
+        }}
+        centered
+      >
+        <Modal.Header closeButton={!removingPermission}>
+          <Modal.Title>Remove user access</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p className="mb-3">
+            This person will lose REC Conference access immediately. They can be granted access again later if needed.
+          </p>
+          <p className="mb-0">
+            <strong>{permissionToRemove ? getUserName(permissionToRemove.userId) : ""}</strong>
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="secondary"
+            onClick={() => setPermissionToRemove(null)}
+            disabled={removingPermission}
+          >
+            Keep access
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => handleDeletePermission(permissionToRemove)}
+            disabled={removingPermission}
+          >
+            {removingPermission ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Removing...
+              </>
+            ) : (
+              "Remove access"
             )}
           </Button>
         </Modal.Footer>

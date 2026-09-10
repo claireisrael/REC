@@ -11,6 +11,7 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import { faPlus, faCheck, faCalendarPlus, faEye } from "@fortawesome/free-solid-svg-icons"
 import { formatAppwriteDate } from "@/lib/utils"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import { useRouter } from "next/navigation"
 
 export default function RecConferencesManager() {
@@ -46,7 +47,7 @@ export default function RecConferencesManager() {
     try {
       await setActiveConference(year, appwriteServices)
       await fetchConferences()
-      setSuccess(`REC ${year} is now the active conference!`)
+      setSuccess(`${formatRecEdition(year)} is now the active conference!`)
     } catch (err) {
       setError("Error setting active conference. Please try again.")
       console.error("Set active error:", err)

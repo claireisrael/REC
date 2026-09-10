@@ -307,7 +307,7 @@ export default function ProgramForm({
                   type="text"
                   value={formData.title}
                   onChange={(event) => handleInputChange("title", event.target.value)}
-                  placeholder="e.g., REC 2026 - Main Program"
+                  placeholder="e.g., REC26 - Main Program"
                   required
                 />
               </label>

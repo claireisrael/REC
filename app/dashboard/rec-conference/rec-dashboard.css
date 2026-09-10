@@ -1095,6 +1095,24 @@
     box-shadow: 0 0 0 3px rgba(46, 158, 204, 0.12);
 }
 
+.rec-input[readonly],
+.rec-select:disabled {
+    background: #f1f5f9;
+    color: #64748b;
+    cursor: not-allowed;
+}
+
+.rec-access-window {
+    display: grid;
+    gap: 12px;
+}
+
+input.rec-input[type="date"],
+input.rec-input[type="time"] {
+    min-height: 44px;
+    cursor: pointer;
+}
+
 .rec-help-text {
     color: #64748b;
     font-size: 0.78rem;
@@ -1352,6 +1370,48 @@
 
 .rec-modal-wide {
     width: min(860px, 100%);
+}
+
+.rec-confirm-backdrop {
+    z-index: 1120;
+}
+
+.rec-confirm-dialog {
+    width: min(480px, 100%);
+}
+
+.rec-confirm-body {
+    max-height: none;
+}
+
+.rec-confirm-body p {
+    margin: 0 0 12px;
+    color: #334155;
+    line-height: 1.55;
+}
+
+.rec-confirm-body p:last-child {
+    margin-bottom: 0;
+}
+
+.rec-confirm-subject {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: #1e293b;
+}
+
+.rec-confirm-subject strong {
+    display: block;
+    font-size: 0.95rem;
+}
+
+.rec-confirm-subject span {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 0.86rem;
 }
 
 .rec-registration-details {
@@ -3383,6 +3443,12 @@
     grid-template-columns: 180px minmax(0, 1fr);
     gap: 18px;
     align-items: center;
+}
+
+.rec-badge-preview-print {
+    display: flex;
+    justify-content: center;
+    grid-template-columns: none;
 }
 
 .rec-badge-preview img {

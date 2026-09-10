@@ -50,6 +50,7 @@ const registrations = [
     registrationType: "Delegate",
     country: "Uganda",
     daysAttending: ["Day 1", "Day 2"],
+    additionalSessions: ["business_forum"],
   },
   {
     $id: "reg-2",
@@ -60,6 +61,7 @@ const registrations = [
     registrationType: "Exhibitor",
     country: "Kenya",
     daysAttending: ["Day 1"],
+    additionalSessions: [],
   },
 ]
 
@@ -106,27 +108,44 @@ const scans = [
     registrationDaysAttending: ["Day 1"],
     matchedAttendanceDays: [],
   },
+  {
+    $id: "scan-4",
+    registrationId: "reg-1",
+    registrationEmail: "amina@example.test",
+    eventId: "entry-day-1",
+    scanType: "conference_entry",
+    status: "accepted",
+    resultReason: "ok",
+    scannedBy: "tera-operator-1",
+    scannerName: "Tera 01050742 · Katonga Hall",
+    deviceId: "01050742",
+    deviceLabel: "Tera HW0009 · Katonga Hall",
+    scannedAt: "2026-10-19T05:45:00.000Z",
+    registrationDaysAttending: ["Day 1", "Day 2"],
+    matchedAttendanceDays: ["Day 1"],
+  },
 ]
 
 test("scanner analytics report exact coverage, event eligibility, operators, and rejection reasons", () => {
   const analytics = buildRecScanAnalytics({ scans, registrations, events, conference })
 
   assert.deepEqual(analytics.summary, {
-    totalScanRecords: 3,
-    acceptedScans: 2,
+    totalScanRecords: 4,
+    acceptedScans: 3,
     rejectedScans: 1,
     duplicateScans: 0,
     uniqueAttendees: 1,
     registeredAttendees: 2,
     notYetScanned: 1,
     attendanceRate: 50,
-    acceptanceRate: 66.7,
+    acceptanceRate: 75,
     configuredEvents: 2,
     activeEvents: 2,
   })
   assert.equal(analytics.byEvent.find((event) => event.eventId === "lunch-day-2").eligibleRegistrants, 1)
   assert.equal(analytics.byEvent.find((event) => event.eventId === "lunch-day-2").attendanceRate, 100)
   assert.equal(analytics.byScanner.find((scanner) => scanner.key === "scanner:two").total, 2)
+  assert.equal(analytics.byScanner.find((scanner) => scanner.key === "tera-operator-1").accepted, 1)
   assert.equal(analytics.rejectionReasons[0].key, "registration_day_not_allowed")
   assert.equal(analytics.timeline.length, 2)
 })
@@ -136,9 +155,15 @@ test("registrant attendance rows are searchable and filterable", () => {
   const amina = rows.find((row) => row.registrationId === "reg-1")
   assert.equal(amina.name, "Dr Amina Nabirye")
   assert.equal(amina.eventCount, 2)
-  assert.equal(amina.acceptedScans, 2)
+  assert.equal(amina.acceptedScans, 3)
+  assert.equal(amina.lastScanAt, "2026-10-20T09:00:00.000Z")
+  assert.equal(amina.lastScanEventName, "Lunch - Day 2")
+  assert.equal(amina.eventsAttended[0].name, "Lunch - Day 2")
+  assert.equal(amina.eventsAttended[1].name, "Main Entrance - Day 1")
   assert.deepEqual(filterRecScanRegistrantRows(rows, { attendance: "not_scanned" }).map((row) => row.registrationId), ["reg-2"])
   assert.deepEqual(filterRecScanRegistrantRows(rows, { search: "solar" }).map((row) => row.registrationId), ["reg-2"])
+  assert.deepEqual(filterRecScanRegistrantRows(rows, { participantCategory: "ug_eu_bf" }).map((row) => row.registrationId), ["reg-1"])
+  assert.deepEqual(filterRecScanRegistrantRows(rows, { participantCategory: "rec" }).map((row) => row.registrationId), ["reg-2"])
 })
 
 test("scan log rows resolve registrant and event names and support filters", () => {
@@ -148,6 +173,13 @@ test("scan log rows resolve registrant and event names and support filters", () 
   assert.equal(rows[0].eventName, "Lunch - Day 2")
   assert.equal(filterRecScanLogRows(rows, { status: "rejected" }).length, 1)
   assert.equal(filterRecScanLogRows(rows, { scanner: "scanner:one" }).length, 1)
+
+  const teraRow = rows.find((row) => row.scanId === "scan-4")
+  assert.equal(teraRow.registrantName, "Dr Amina Nabirye")
+  assert.equal(teraRow.eventName, "Main Entrance - Day 1")
+  assert.equal(teraRow.scannerKind, "tera")
+  assert.equal(teraRow.deviceLabel, "Tera HW0009 · Katonga Hall")
+  assert.equal(filterRecScanLogRows(rows, { search: "katonga" }).length, 1)
 })
 
 test("analytics CSV output neutralizes spreadsheet formulas", () => {

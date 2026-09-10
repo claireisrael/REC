@@ -12,6 +12,7 @@ import { faEdit, faInfoCircle, faCalendarAlt, faMapMarkerAlt, faUsers, faCheck, 
 import Link from "next/link"
 import React from "react"
 import { formatAppwriteDate } from "@/lib/utils"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import "../../../rec-dashboard.css"
 
 export default function ConferenceDetailsPage({ params }) {
@@ -78,7 +79,7 @@ export default function ConferenceDetailsPage({ params }) {
   const handleSetActive = async () => {
     try {
       await setActiveConference(conference.year, appwriteServices)
-      setSuccess(`REC ${conference.year} is now the active conference!`)
+      setSuccess(`${formatRecEdition(conference.year)} is now the active conference!`)
       fetchConference() // Refresh data to show active status
     } catch (err) {
       console.error(err)

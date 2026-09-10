@@ -20,6 +20,8 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons"
 import { useAuth } from "@/lib/auth/auth-provider"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
 import "../../rec-dashboard.css"
 
 const reportTypes = [
@@ -128,6 +130,7 @@ export default function RecReportsAdminPage() {
   const [saving, setSaving] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [reportToDelete, setReportToDelete] = useState(null)
 
   const selectedConference = useMemo(
     () => conferences.find((conference) => conference.$id === conferenceId) || null,
@@ -223,7 +226,7 @@ export default function RecReportsAdminPage() {
   }
 
   const deleteReport = async (report) => {
-    if (!window.confirm(`Delete "${report.title}"? The external report file will not be deleted.`)) return
+    if (!report?.$id) return
     setSaving(report.$id)
     setError("")
     setSuccess("")
@@ -234,8 +237,10 @@ export default function RecReportsAdminPage() {
       else await loadReports()
       await loadConferences()
       setSuccess("Conference report deleted.")
+      setReportToDelete(null)
     } catch (err) {
       setError(err.message || "Failed to delete conference report.")
+      setReportToDelete(null)
     } finally {
       setSaving("")
     }
@@ -311,7 +316,7 @@ export default function RecReportsAdminPage() {
               <option value="">Select completed conference</option>
               {conferences.map((conference) => (
                 <option key={conference.$id} value={conference.$id}>
-                  {conference.title || conference.shortName || `REC ${conference.year}`}
+                  {conference.title || conference.shortName || formatRecEdition(conference.year)}
                 </option>
               ))}
             </select>
@@ -382,7 +387,7 @@ export default function RecReportsAdminPage() {
                   value={form.title}
                   maxLength={180}
                   onChange={(event) => updateForm({ title: event.target.value })}
-                  placeholder="REC 2025 Conference Report"
+                  placeholder="REC25 Conference Report"
                   required
                 />
               </div>
@@ -538,7 +543,7 @@ export default function RecReportsAdminPage() {
                           <button type="button" className="rec-btn rec-btn-outline" onClick={() => editReport(report)} disabled={saving === report.$id}>
                             <FontAwesomeIcon icon={faPenToSquare} /> Edit
                           </button>
-                          <button type="button" className="rec-btn rec-btn-accent" onClick={() => deleteReport(report)} disabled={saving === report.$id}>
+                          <button type="button" className="rec-btn rec-btn-accent" onClick={() => setReportToDelete(report)} disabled={saving === report.$id}>
                             {saving === report.$id ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faTrash} />}
                             Delete
                           </button>
@@ -565,6 +570,27 @@ export default function RecReportsAdminPage() {
             </div>
           </section>
         </div>
+      )}
+
+      {reportToDelete && (
+        <RecConfirmDialog
+          title="Delete conference report"
+          confirmLabel="Delete report"
+          busy={saving === reportToDelete.$id}
+          onClose={() => {
+            if (saving === reportToDelete.$id) return
+            setReportToDelete(null)
+          }}
+          onConfirm={() => deleteReport(reportToDelete)}
+        >
+          <p>
+            This removes the report listing from the REC conference library. The external file or URL will not be deleted.
+          </p>
+          <div className="rec-confirm-subject">
+            <strong>{reportToDelete.title || "Untitled report"}</strong>
+            <span>{typeLabel(reportToDelete.reportType)}</span>
+          </div>
+        </RecConfirmDialog>
       )}
     </div>
   )

@@ -25,6 +25,7 @@ import { getRegistrationStats } from "@/lib/appwrite/rec-registrations"
 import { getRecCouponAnalytics } from "@/lib/appwrite/rec-coupons"
 import { getProgramsByConference } from "@/lib/appwrite/rec-programmes"
 import { formatAppwriteDate } from "@/lib/utils"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import "./rec-dashboard.css"
 
 const emptySummary = {
@@ -321,7 +322,7 @@ export default function RecConferencePage() {
               </div>
             ) : activeConference ? (
               <>
-                <h2>{activeConference.title || `REC ${activeConference.year}`}</h2>
+                <h2>{activeConference.title || formatRecEdition(activeConference.year)}</h2>
                 <div className={`rec-mode-pill rec-mode-${registrationMode.tone}`}>
                   {registrationMode.label}
                 </div>

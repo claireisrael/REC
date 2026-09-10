@@ -20,6 +20,7 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons"
 import { useAuth } from "@/lib/auth/auth-provider"
+import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
 import "../../rec-dashboard.css"
 
 const mediaTypes = [
@@ -142,6 +143,7 @@ export default function RecMediaAdminPage() {
   const [saving, setSaving] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [itemToDelete, setItemToDelete] = useState(null)
 
   const selectedConference = useMemo(
     () => conferences.find((conference) => conference.$id === conferenceId) || null,
@@ -243,8 +245,7 @@ export default function RecMediaAdminPage() {
   }
 
   const deleteItem = async (item) => {
-    const confirmed = window.confirm(`Delete "${item.title}"? Uploaded sample images for this item will also be removed.`)
-    if (!confirmed) return
+    if (!item?.$id) return
     setSaving(item.$id)
     setError("")
     setSuccess("")
@@ -257,8 +258,10 @@ export default function RecMediaAdminPage() {
         await loadMedia()
       }
       setSuccess("Media item deleted.")
+      setItemToDelete(null)
     } catch (err) {
       setError(err.message || "Failed to delete media item.")
+      setItemToDelete(null)
     } finally {
       setSaving("")
     }
@@ -622,7 +625,7 @@ export default function RecMediaAdminPage() {
                             <FontAwesomeIcon icon={faPenToSquare} />
                             Edit
                           </button>
-                          <button type="button" className="rec-btn rec-btn-accent" onClick={() => deleteItem(item)} disabled={saving === item.$id}>
+                          <button type="button" className="rec-btn rec-btn-accent" onClick={() => setItemToDelete(item)} disabled={saving === item.$id}>
                             {saving === item.$id ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faTrash} />}
                             Delete
                           </button>
@@ -659,6 +662,27 @@ export default function RecMediaAdminPage() {
             </div>
           </section>
         </div>
+      )}
+
+      {itemToDelete && (
+        <RecConfirmDialog
+          title="Delete media item"
+          confirmLabel="Delete media"
+          busy={saving === itemToDelete.$id}
+          onClose={() => {
+            if (saving === itemToDelete.$id) return
+            setItemToDelete(null)
+          }}
+          onConfirm={() => deleteItem(itemToDelete)}
+        >
+          <p>
+            This removes the media listing from the conference library. Uploaded sample images for this item will also be removed.
+          </p>
+          <div className="rec-confirm-subject">
+            <strong>{itemToDelete.title || "Untitled media"}</strong>
+            <span>{mediaTypes.find((type) => type.value === itemToDelete.mediaType)?.label || "Media item"}</span>
+          </div>
+        </RecConfirmDialog>
       )}
     </div>
   )

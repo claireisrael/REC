@@ -18,6 +18,7 @@ export async function GET(request) {
       search: searchParams.get("search") || "",
       attendance: searchParams.get("attendance") || "all",
       registrationType: searchParams.get("registrationType") || "",
+      participantCategory: searchParams.get("participantCategory") || "",
       page: searchParams.get("page") || "1",
       limit: searchParams.get("limit") || "25",
     }))

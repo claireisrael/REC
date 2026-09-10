@@ -28,7 +28,11 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons"
 import { useAuth } from "@/lib/auth/auth-provider"
-import { REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
+import { useAppwrite } from "@/lib/appwrite/provider"
+import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
+import { getRecBadgeViewPath, REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
 
 const eventTypes = [
   { value: "conference_entry", label: "Conference Entrance" },
@@ -73,13 +77,17 @@ const emptyOperatorForm = {
   allowedEventIds: [],
   allowedVenues: [],
   allowedDays: [],
-  accessStartsAt: "",
-  accessEndsAt: "",
+  accessStartDate: "",
+  accessStartTime: "",
+  accessEndDate: "",
+  accessEndTime: "",
 }
 
 const emptyTeraAccessForm = {
-  accessStartsAt: "",
-  accessEndsAt: "",
+  accessStartDate: "",
+  accessStartTime: "",
+  accessEndDate: "",
+  accessEndTime: "",
   allowedDays: [],
 }
 
@@ -87,9 +95,32 @@ const typeLabels = Object.fromEntries(eventTypes.map((type) => [type.value, type
 const ruleLabels = Object.fromEntries(scanRules.map((rule) => [rule.value, rule.label]))
 const destructiveDeleteConfirmation = "DELETE_SCAN_EVENT_DATA"
 
+function normalizeTimeValue(time) {
+  const value = String(time || "").trim()
+  if (/^\d{2}:\d{2}$/.test(value)) return `${value}:00`
+  if (/^\d{2}:\d{2}:\d{2}$/.test(value)) return value
+  return ""
+}
+
 function toDateTime(date, time) {
-  if (!date || !time) return ""
-  return `${date}T${time}:00+03:00`
+  if (!date) return ""
+  const timePart = normalizeTimeValue(time)
+  if (!timePart) return ""
+  return `${date}T${timePart}+03:00`
+}
+
+function hasCompleteTeraWindow(form) {
+  return Boolean(form?.accessStartDate && form?.accessStartTime && form?.accessEndDate && form?.accessEndTime)
+}
+
+function hasPartialTeraWindow(form) {
+  const filled = [
+    form?.accessStartDate,
+    form?.accessStartTime,
+    form?.accessEndDate,
+    form?.accessEndTime,
+  ].filter(Boolean).length
+  return filled > 0 && filled < 4
 }
 
 function formatDate(value) {
@@ -116,9 +147,9 @@ function toKampalaFormParts(value) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
   }).formatToParts(date)
   const get = (type) => parts.find((part) => part.type === type)?.value || ""
   return {
@@ -145,16 +176,9 @@ function mapEventToForm(scanEvent) {
   }
 }
 
-function toKampalaDateTimeLocal(value) {
-  const parts = toKampalaFormParts(value)
-  return parts.date && parts.time ? `${parts.date}T${parts.time}` : ""
-}
-
-function fromKampalaDateTimeLocal(value) {
-  return value ? `${value}:00+03:00` : ""
-}
-
 function mapOperatorToForm(operator) {
+  const start = toKampalaFormParts(operator.accessStartsAt)
+  const end = toKampalaFormParts(operator.accessEndsAt)
   return {
     name: operator.name || "",
     email: operator.email || "",
@@ -165,37 +189,84 @@ function mapOperatorToForm(operator) {
     allowedEventIds: operator.allowedEventIds || [],
     allowedVenues: operator.allowedVenues || [],
     allowedDays: operator.allowedDays || [],
-    accessStartsAt: toKampalaDateTimeLocal(operator.accessStartsAt),
-    accessEndsAt: toKampalaDateTimeLocal(operator.accessEndsAt),
+    accessStartDate: start.date,
+    accessStartTime: start.time,
+    accessEndDate: end.date,
+    accessEndTime: end.time,
   }
+}
+
+function AccessWindowFields({
+  idPrefix,
+  startDate,
+  startTime,
+  endDate,
+  endTime,
+  onChange,
+  autoFocus = false,
+}) {
+  return (
+    <div className="rec-access-window">
+      <div className="rec-grid rec-grid-two">
+        <div className="rec-field">
+          <label className="rec-label" htmlFor={`${idPrefix}-start-date`}>Start date</label>
+          <input
+            id={`${idPrefix}-start-date`}
+            className="rec-input"
+            type="date"
+            value={startDate}
+            autoFocus={autoFocus}
+            onChange={(event) => onChange({ startDate: event.target.value })}
+          />
+        </div>
+        <div className="rec-field">
+          <label className="rec-label" htmlFor={`${idPrefix}-start-time`}>Start time</label>
+          <input
+            id={`${idPrefix}-start-time`}
+            className="rec-input"
+            type="time"
+            value={startTime}
+            onChange={(event) => onChange({ startTime: event.target.value })}
+          />
+        </div>
+      </div>
+      <div className="rec-grid rec-grid-two">
+        <div className="rec-field">
+          <label className="rec-label" htmlFor={`${idPrefix}-end-date`}>End date</label>
+          <input
+            id={`${idPrefix}-end-date`}
+            className="rec-input"
+            type="date"
+            value={endDate}
+            onChange={(event) => onChange({ endDate: event.target.value })}
+          />
+        </div>
+        <div className="rec-field">
+          <label className="rec-label" htmlFor={`${idPrefix}-end-time`}>End time</label>
+          <input
+            id={`${idPrefix}-end-time`}
+            className="rec-input"
+            type="time"
+            value={endTime}
+            onChange={(event) => onChange({ endTime: event.target.value })}
+          />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function isTeraOperatorEmail(email) {
   return String(email || "").toLowerCase().endsWith("@tera.rec.local")
 }
 
-function conferenceDateOnly(value) {
-  return String(value || "").trim().slice(0, 10)
-}
-
-function defaultTeraAccessForm(conference, operators = []) {
-  const existing = operators.find((operator) => (
-    operator.deviceKind === "tera_hid" && (operator.accessStartsAt || operator.accessEndsAt || operator.allowedDays?.length)
-  ))
-  if (existing) {
-    return {
-      accessStartsAt: toKampalaDateTimeLocal(existing.accessStartsAt),
-      accessEndsAt: toKampalaDateTimeLocal(existing.accessEndsAt),
-      allowedDays: existing.allowedDays || [],
-    }
-  }
-
+function defaultTeraAccessForm(conference) {
   const days = conference?.days || []
-  const firstDate = conferenceDateOnly(days[0]?.date || conference?.startDate)
-  const lastDate = conferenceDateOnly(days[days.length - 1]?.date || conference?.endDate || firstDate)
   return {
-    accessStartsAt: firstDate ? `${firstDate}T08:00` : "",
-    accessEndsAt: lastDate ? `${lastDate}T18:00` : "",
+    accessStartDate: "",
+    accessStartTime: "",
+    accessEndDate: "",
+    accessEndTime: "",
     allowedDays: days.map((_, index) => String(index + 1)),
   }
 }
@@ -286,6 +357,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     getModulePermissionLevel,
     MODULES,
   } = useAuth()
+  const appwriteServices = useAppwrite()
 
   const hasRecAccess = hasModuleAccess(MODULES.REC_CONFERENCE)
   const canManageRec = canPerformModuleAction(MODULES.REC_CONFERENCE, "manage")
@@ -331,6 +403,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const [saving, setSaving] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [confirmDialog, setConfirmDialog] = useState(null)
 
   const selectedConference = useMemo(
     () => conferences.find((conference) => conference.$id === conferenceId) || null,
@@ -352,8 +425,26 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     && visibleEventIds.every((eventId) => selectedEventIds.includes(eventId))
 
   const loadConferences = useCallback(async () => {
-    const data = await fetchJson("/api/rec/scanning/conferences")
-    const rows = data.documents || []
+    let rows = []
+    try {
+      const data = await fetchJson("/api/rec/scanning/conferences")
+      rows = data.documents || []
+    } catch (error) {
+      if (!appwriteServices) throw error
+      const response = await getAllRecConferences(appwriteServices)
+      rows = (response.documents || []).map((conference) => ({
+        $id: conference.$id,
+        year: conference.year,
+        title: conference.title,
+        shortName: conference.shortName,
+        startDate: conference.startDate,
+        endDate: conference.endDate,
+        location: conference.location,
+        venue: conference.venue,
+        days: conference.days || [],
+        isActive: conference.isActive,
+      }))
+    }
     setConferences(rows)
     setConferenceId((current) => (
       current
@@ -362,7 +453,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       || rows[0]?.$id
       || ""
     ))
-  }, [initialConferenceId])
+  }, [appwriteServices, initialConferenceId])
 
   const loadWorkspace = useCallback(async () => {
     if (!conferenceId) return
@@ -383,7 +474,6 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       conferenceId,
       page: String(operatorPage),
       limit: String(operatorLimit),
-      syncTera: "1",
     })
     const shouldLoadEvents = activeView === "events" || activeView === "operators"
     const [eventData, operatorData, badgeData] = await Promise.all([
@@ -694,8 +784,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         body: JSON.stringify({
           ...operatorForm,
           conferenceId,
-          accessStartsAt: fromKampalaDateTimeLocal(operatorForm.accessStartsAt),
-          accessEndsAt: fromKampalaDateTimeLocal(operatorForm.accessEndsAt),
+          accessStartsAt: toDateTime(operatorForm.accessStartDate, operatorForm.accessStartTime),
+          accessEndsAt: toDateTime(operatorForm.accessEndDate, operatorForm.accessEndTime),
         }),
       })
       setOperatorForm(emptyOperatorForm)
@@ -739,7 +829,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   }
 
   const openTeraRegister = () => {
-    setTeraAccessForm(defaultTeraAccessForm(selectedConference, operators))
+    setTeraAccessForm(defaultTeraAccessForm(selectedConference))
     setModalError("")
     setError("")
     setSuccess("")
@@ -756,6 +846,12 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const registerTeraScanners = async (event) => {
     event?.preventDefault?.()
     if (!conferenceId) return
+    if (hasPartialTeraWindow(teraAccessForm)) {
+      setModalError("Enter start date, start time, end date, and end time to apply the same window to every Tera. Leave all four blank to keep each station's current times.")
+      return
+    }
+
+    const applyWindow = hasCompleteTeraWindow(teraAccessForm)
     setSaving("tera")
     setModalError("")
     setError("")
@@ -766,14 +862,23 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conferenceId,
-          accessStartsAt: fromKampalaDateTimeLocal(teraAccessForm.accessStartsAt),
-          accessEndsAt: fromKampalaDateTimeLocal(teraAccessForm.accessEndsAt),
+          ...(applyWindow
+            ? {
+                accessStartsAt: toDateTime(teraAccessForm.accessStartDate, teraAccessForm.accessStartTime),
+                accessEndsAt: toDateTime(teraAccessForm.accessEndDate, teraAccessForm.accessEndTime),
+              }
+            : {}),
           allowedDays: teraAccessForm.allowedDays,
         }),
       })
       setTeraModalOpen(false)
       setTeraAccessForm(emptyTeraAccessForm)
-      setSuccess(`Registered ${data.created || 0} Tera scanners and refreshed ${data.updated || 0} existing stations with the same start/end window as phone operators. You can still edit each unit.`)
+      const created = data.created || 0
+      const updated = data.updated || 0
+      const windowText = applyWindow || data.appliedAccessWindow
+        ? " The same access window was applied to all stations. You can still edit one Tera if it needs different times."
+        : " Each station kept the access times already saved on it."
+      setSuccess(`${created ? `Registered ${created} new Tera scanner${created === 1 ? "" : "s"} and refreshed ${updated} existing station${updated === 1 ? "" : "s"}.` : `All ${updated} Tera stations are already registered and were refreshed.`}${windowText}`)
       await loadWorkspace()
     } catch (err) {
       setModalError(err.message || "Failed to register Tera barcode scanners.")
@@ -782,12 +887,28 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     }
   }
 
-  const deleteScannerOperator = async (operator) => {
-    const confirmed = window.confirm(
-      `Permanently delete ${operator.name}? This immediately signs out their scanner devices and invalidates outstanding access codes. Historical scan records will be retained.`
-    )
-    if (!confirmed) return
+  const deleteScannerOperator = (operator) => {
+    setConfirmDialog({
+      title: "Delete scanner operator",
+      confirmLabel: "Delete operator",
+      busyKey: `operator:${operator.$id}`,
+      body: (
+        <>
+          <p>
+            This will remove the operator from the scanner roster, sign out their devices, and invalidate outstanding access codes.
+            Historical scan records will be kept.
+          </p>
+          <div className="rec-confirm-subject">
+            <strong>{operator.name || "Unnamed operator"}</strong>
+            <span>{operator.email || operator.deviceSerial || "No email on file"}</span>
+          </div>
+        </>
+      ),
+      onConfirm: () => performDeleteScannerOperator(operator),
+    })
+  }
 
+  const performDeleteScannerOperator = async (operator) => {
     const savingKey = `operator:${operator.$id}`
     setSaving(savingKey)
     setError("")
@@ -796,6 +917,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       const data = await fetchJson(`/api/rec/scanning/operators/${operator.$id}`, { method: "DELETE" })
       const sessionText = data.revokedSessions ? ` ${data.revokedSessions} scanner session${data.revokedSessions === 1 ? " was" : "s were"} revoked.` : ""
       setSuccess(`Scanner operator deleted.${sessionText}`)
+      setConfirmDialog(null)
       if (editingOperatorId === operator.$id) cancelOperatorEdit()
       if (operators.length === 1 && operatorPage > 1) {
         setOperatorPage((previous) => Math.max(1, previous - 1))
@@ -804,6 +926,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       await loadWorkspace()
     } catch (err) {
       setError(err.message || "Failed to delete scanner operator.")
+      setConfirmDialog(null)
     } finally {
       setSaving("")
     }
@@ -855,11 +978,29 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     issueBadges(missingIds, { sendEmail: true })
   }
 
-  const revokeBadge = async (row) => {
+  const revokeBadge = (row) => {
     if (!row?.badge?.$id || !conferenceId) return
-    const confirmed = window.confirm(`Revoke the badge for ${row.registration?.name || row.registration?.email || "this registrant"}?`)
-    if (!confirmed) return
+    const registrantName = row.registration?.name || row.registration?.email || "this registrant"
+    setConfirmDialog({
+      title: "Revoke badge",
+      confirmLabel: "Revoke badge",
+      busyKey: row.badge.$id,
+      body: (
+        <>
+          <p>
+            Revoking this badge immediately invalidates the printed QR code. The registrant will not be able to pass scan points until a new badge is issued.
+          </p>
+          <div className="rec-confirm-subject">
+            <strong>{registrantName}</strong>
+            <span>{row.registration?.email || "No email on file"}</span>
+          </div>
+        </>
+      ),
+      onConfirm: () => performRevokeBadge(row),
+    })
+  }
 
+  const performRevokeBadge = async (row) => {
     setSaving(row.badge.$id)
     setError("")
     setSuccess("")
@@ -875,9 +1016,11 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         }),
       })
       setSuccess("Badge revoked.")
+      setConfirmDialog(null)
       await loadWorkspace()
     } catch (err) {
       setError(err.message || "Failed to revoke badge.")
+      setConfirmDialog(null)
     } finally {
       setSaving("")
     }
@@ -967,7 +1110,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
               >
                 {conferences.map((conference) => (
                   <option key={conference.$id} value={conference.$id}>
-                    {conference.title || `REC ${conference.year}`} {conference.isActive ? "(Active)" : ""}
+                    {conference.title || formatRecEdition(conference.year)} {conference.isActive ? "(Active)" : ""}
                   </option>
                 ))}
               </select>
@@ -1164,7 +1307,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                       Scanner Operators
                     </h3>
                     <p className="rec-muted mb-0 mt-1">
-                      Tera barcode scanners appear here as stations. Assign them to scan events, then unlock `/rec-scanner` with the device serial.
+                      Four Teras sit at main entrance and six in halls. Exhibition, Rwizi, and Kazinga use phone scanners: add their email here, then they sign in with the emailed code.
                     </p>
                   </div>
                   <div className="rec-page-actions">
@@ -1436,6 +1579,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                           const registration = row.registration || {}
                           const badge = row.badge || null
                           const selected = selectedBadgeRegistrations.includes(registration.$id)
+                          const badgeViewPath = getRecBadgeViewPath(badge?.lastBadgeUrl)
                           return (
                             <tr key={registration.$id}>
                               <td data-label="Select">
@@ -1482,8 +1626,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                                 )}
                               </td>
                               <td data-label="Badge Link">
-                                {badge?.lastBadgeUrl && badge?.isActive ? (
-                                  <a href={badge.lastBadgeUrl} target="_blank" rel="noopener noreferrer" className="rec-inline-link">
+                                {badge?.isActive && badgeViewPath ? (
+                                  <a href={badgeViewPath} target="_blank" rel="noopener noreferrer" className="rec-inline-link">
                                     <FontAwesomeIcon icon={faLink} />
                                     Open
                                   </a>
@@ -1717,32 +1861,27 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
               </div>
             )}
             <p className="rec-muted mb-0">
-              Set the same start time, end time, and conference days used for phone operators. This applies to all 10 Tera stations (8 halls and 2 main entrance). You can still edit one unit afterwards.
+              These 10 Teras are already assigned to halls. Use this form to refresh them, not to pick a hall.
+              Leave all date and time fields blank to keep each station&apos;s current access window.
+              Fill start date, start time, end date, and end time to give every Tera the same window.
+              To change only one unit, close this and use Edit on that station.
             </p>
-            <div className="rec-grid rec-grid-two">
-              <div className="rec-field">
-                <label className="rec-label" htmlFor="tera-access-start">Access Starts</label>
-                <input
-                  id="tera-access-start"
-                  className="rec-input"
-                  type="datetime-local"
-                  value={teraAccessForm.accessStartsAt}
-                  onChange={(event) => setTeraAccessForm((previous) => ({ ...previous, accessStartsAt: event.target.value }))}
-                  required
-                />
-              </div>
-              <div className="rec-field">
-                <label className="rec-label" htmlFor="tera-access-end">Access Ends</label>
-                <input
-                  id="tera-access-end"
-                  className="rec-input"
-                  type="datetime-local"
-                  value={teraAccessForm.accessEndsAt}
-                  onChange={(event) => setTeraAccessForm((previous) => ({ ...previous, accessEndsAt: event.target.value }))}
-                  required
-                />
-              </div>
-            </div>
+            <AccessWindowFields
+              idPrefix="tera-access"
+              startDate={teraAccessForm.accessStartDate}
+              startTime={teraAccessForm.accessStartTime}
+              endDate={teraAccessForm.accessEndDate}
+              endTime={teraAccessForm.accessEndTime}
+              onChange={({ startDate, startTime, endDate, endTime }) => {
+                setTeraAccessForm((previous) => ({
+                  ...previous,
+                  ...(startDate !== undefined ? { accessStartDate: startDate } : {}),
+                  ...(startTime !== undefined ? { accessStartTime: startTime } : {}),
+                  ...(endDate !== undefined ? { accessEndDate: endDate } : {}),
+                  ...(endTime !== undefined ? { accessEndTime: endTime } : {}),
+                }))
+              }}
+            />
             {dayOptions.length > 0 && (
               <div>
                 <span className="rec-label">Allowed Conference Days</span>
@@ -1802,6 +1941,31 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                 <p className="mb-0">{modalError}</p>
               </div>
             )}
+            <div>
+              <span className="rec-label">Access window</span>
+              <p className="rec-muted mb-2">
+                {isTeraOperatorEmail(operatorForm.email)
+                  ? "Change the start and end times here. Serial, email, and hall stay locked because they belong to the hardware."
+                  : "Scans outside this window are blocked. Leave blank for no time limit."}
+              </p>
+              <AccessWindowFields
+                idPrefix="scanner-access"
+                startDate={operatorForm.accessStartDate}
+                startTime={operatorForm.accessStartTime}
+                endDate={operatorForm.accessEndDate}
+                endTime={operatorForm.accessEndTime}
+                autoFocus={isTeraOperatorEmail(operatorForm.email)}
+                onChange={({ startDate, startTime, endDate, endTime }) => {
+                  setOperatorForm((previous) => ({
+                    ...previous,
+                    ...(startDate !== undefined ? { accessStartDate: startDate } : {}),
+                    ...(startTime !== undefined ? { accessStartTime: startTime } : {}),
+                    ...(endDate !== undefined ? { accessEndDate: endDate } : {}),
+                    ...(endTime !== undefined ? { accessEndTime: endTime } : {}),
+                  }))
+                }}
+              />
+            </div>
             <div className="rec-grid rec-grid-two">
               <div className="rec-field">
                 <label className="rec-label" htmlFor="scanner-name">Name</label>
@@ -1810,7 +1974,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   className="rec-input"
                   value={operatorForm.name}
                   onChange={(event) => setOperatorForm((previous) => ({ ...previous, name: event.target.value }))}
-                  autoFocus
+                  autoFocus={!isTeraOperatorEmail(operatorForm.email)}
                   required
                 />
               </div>
@@ -1877,31 +2041,6 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                 </select>
               </div>
             </div>
-            <div className="rec-grid rec-grid-two">
-              <div className="rec-field">
-                <label className="rec-label" htmlFor="scanner-access-start">Access Starts</label>
-                <input
-                  id="scanner-access-start"
-                  className="rec-input"
-                  type="datetime-local"
-                  value={operatorForm.accessStartsAt}
-                  onChange={(event) => setOperatorForm((previous) => ({ ...previous, accessStartsAt: event.target.value }))}
-                />
-              </div>
-              <div className="rec-field">
-                <label className="rec-label" htmlFor="scanner-expiry">Access Ends</label>
-                <input
-                  id="scanner-expiry"
-                  className="rec-input"
-                  type="datetime-local"
-                  value={operatorForm.accessEndsAt}
-                  onChange={(event) => setOperatorForm((previous) => ({ ...previous, accessEndsAt: event.target.value }))}
-                />
-              </div>
-            </div>
-            <p className="rec-muted mb-0">
-              Access start, end, and conference days work the same for Tera stations and phone operators. Scans outside this window are blocked.
-            </p>
             <div>
               <span className="rec-label">Allowed Event Types</span>
               <div className="rec-checkbox-grid rec-checkbox-grid-compact">
@@ -2086,6 +2225,21 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             </div>
           )}
         </ScannerManagementModal>
+      )}
+
+      {confirmDialog && (
+        <RecConfirmDialog
+          title={confirmDialog.title}
+          confirmLabel={confirmDialog.confirmLabel}
+          busy={saving === confirmDialog.busyKey}
+          onClose={() => {
+            if (saving === confirmDialog.busyKey) return
+            setConfirmDialog(null)
+          }}
+          onConfirm={confirmDialog.onConfirm}
+        >
+          {confirmDialog.body}
+        </RecConfirmDialog>
       )}
     </div>
   )

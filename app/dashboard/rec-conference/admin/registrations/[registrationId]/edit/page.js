@@ -9,6 +9,7 @@ import { useAppwrite } from "@/lib/appwrite/provider"
 import AdminRegistrationForm from "@/components/rec-registration/AdminRegistrationForm"
 import { getActiveRecConference, getConferenceYears, getRecConferenceByYear } from "@/lib/appwrite/rec-conferences"
 import { getRecRegistrationById, sendConfirmationEmail, updateRegistrationForConferenceYear } from "@/lib/appwrite/rec-registrations"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import "../../../../rec-dashboard.css"
 
 export default function EditRecRegistrationPage({ params }) {
@@ -85,15 +86,22 @@ export default function EditRecRegistrationPage({ params }) {
     try {
       const saved = await updateRegistrationForConferenceYear(registrationId, payload, selectedYear, appwriteServices)
 
+      let mailFailed = false
       if (options.sendConfirmation) {
-        await sendConfirmationEmail(
-          { ...payload, conferenceYears: saved.conferenceYears },
-          selectedYear,
-          conference.sponsorshipPackageUrl
-        )
+        try {
+          await sendConfirmationEmail(
+            { ...payload, conferenceYears: saved.conferenceYears },
+            selectedYear,
+            conference.sponsorshipPackageUrl
+          )
+        } catch (emailErr) {
+          console.error("Confirmation email failed after registration update:", emailErr)
+          mailFailed = true
+        }
       }
 
-      router.push(`/dashboard/rec-conference/admin/registrations?year=${selectedYear}`)
+      const mailQuery = mailFailed ? "&mail=failed" : ""
+      router.push(`/dashboard/rec-conference/admin/registrations?year=${selectedYear}${mailQuery}`)
     } catch (err) {
       console.error("Error updating registration:", err)
       setError(err?.message || "Failed to update registration.")
@@ -136,7 +144,7 @@ export default function EditRecRegistrationPage({ params }) {
         <Form.Label>Conference Year</Form.Label>
         <Form.Select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
           {availableYears.map(year => (
-            <option key={year} value={year}>REC {year}</option>
+            <option key={year} value={year}>{formatRecEdition(year)}</option>
           ))}
         </Form.Select>
       </Form.Group>

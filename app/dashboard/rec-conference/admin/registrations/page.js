@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import {
   faArrowLeft,
@@ -32,6 +33,8 @@ function AccessMessage({ icon, title, children }) {
 }
 
 export default function RecRegistrationsPage() {
+  const searchParams = useSearchParams()
+  const mailFailed = searchParams.get("mail") === "failed"
   const {
     isSeniorManager,
     hasModuleAccess,
@@ -77,7 +80,7 @@ export default function RecRegistrationsPage() {
           </div>
           <h2 className="rec-header-gradient mb-2">Registration Management</h2>
           <p className="rec-muted mb-0">
-            Review registrants, add admin registrations, and page through records using Appwrite pagination.
+            People register themselves on the public form. Use this page to review, edit, and add registrations with full admin rights.
           </p>
         </div>
         {userPermissionLevel && (
@@ -87,13 +90,28 @@ export default function RecRegistrationsPage() {
         )}
       </div>
 
+      {mailFailed && (
+        <div className="rec-alert mb-4" role="status">
+          <div className="rec-inline-note">
+            <FontAwesomeIcon icon={faExclamationTriangle} />
+            <div>
+              <strong>Registration saved.</strong>
+              <p className="mb-0">
+                The confirmation email could not be sent. You can open the registration later and send it again.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="rec-alert mb-4">
         <div className="rec-inline-note">
           <FontAwesomeIcon icon={faUserCheck} />
           <div>
-            <strong>Admin registration override is available.</strong>
+            <strong>People register themselves. Admins keep full rights.</strong>
             <p className="mb-0">
-              Admin users can create or edit registrations from this module even when public registration is closed or coupon-only.
+              Public registration is at <Link href="/rec-registration">/rec-registration</Link>.
+              Admins can still create or edit registrations here even when public registration is closed or coupon-only.
             </p>
           </div>
         </div>

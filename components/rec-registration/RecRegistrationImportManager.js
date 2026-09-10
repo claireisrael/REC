@@ -22,6 +22,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import { useAppwrite } from "@/lib/appwrite/provider"
 import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 
 const TEMPLATE_TYPES = {
   STANDARD: "standard",
@@ -435,7 +436,7 @@ export default function RecRegistrationImportManager() {
                   >
                     {conferences.map((conference) => (
                       <option key={conference.$id} value={conference.$id}>
-                        REC {conference.year} - {conference.title}
+                        {formatRecEdition(conference.year)} - {conference.title}
                         {conference.isActive ? " (Active)" : ""}
                       </option>
                     ))}
@@ -604,7 +605,7 @@ export default function RecRegistrationImportManager() {
                   {importRecord.fileName}
                 </h3>
                 <p className="rec-muted mb-0 mt-1">
-                  REC {importRecord.conferenceYear} · {statusLabel(importRecord.templateType)} template ·
+                  {formatRecEdition(importRecord.conferenceYear)} · {statusLabel(importRecord.templateType)} template ·
                   {" "}emails {importRecord.sendEmails ? "enabled" : "disabled"}
                 </p>
               </div>

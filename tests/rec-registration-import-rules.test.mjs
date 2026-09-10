@@ -13,8 +13,15 @@ import {
   validateRegistrationImportHeaders,
 } from "../lib/rec-conference/registration-import-rules.mjs"
 import {
+  formatRecParticipantCategory,
+  formatRecParticipantCategoryTag,
   getRecBadgeConferenceTitle,
+  getRecOptionalSessionCopy,
+  getRecParticipantCategoryDirection,
   normalizeRecOptionalSessions,
+  recParticipantCategoryQueryPlan,
+  registrationMatchesParticipantCategory,
+  applyRecParticipantCategoryQueries,
 } from "../lib/rec-conference/registration-tracks.mjs"
 
 const conferenceDays = [
@@ -224,7 +231,7 @@ test("AdditionalSessions is optional in import files and does not break existing
   )
 
   const selected = validateAndMapRegistrationImportRow(
-    { ...validRow, AdditionalSessions: "Business Forum / Marketplace" },
+    { ...validRow, AdditionalSessions: "UG-EU Business Forum" },
     {
       templateType: REC_IMPORT_TEMPLATE_TYPES.STANDARD,
       conferenceDays,
@@ -233,20 +240,115 @@ test("AdditionalSessions is optional in import files and does not break existing
   )
   assert.equal(selected.valid, true)
   assert.deepEqual(selected.payload.additionalSessions, ["business_forum"])
+
+  const marketplace = validateAndMapRegistrationImportRow(
+    { ...validRow, AdditionalSessions: "African Energy Market Place" },
+    {
+      templateType: REC_IMPORT_TEMPLATE_TYPES.STANDARD,
+      conferenceDays,
+      validCountries: ["Uganda"],
+    }
+  )
+  assert.equal(marketplace.valid, true)
+  assert.deepEqual(marketplace.payload.additionalSessions, ["marketplace"])
+
+  const both = validateAndMapRegistrationImportRow(
+    { ...validRow, AdditionalSessions: "REC26, UG-EU BF & AEMP" },
+    {
+      templateType: REC_IMPORT_TEMPLATE_TYPES.STANDARD,
+      conferenceDays,
+      validCountries: ["Uganda"],
+    }
+  )
+  assert.equal(both.valid, true)
+  assert.deepEqual(both.payload.additionalSessions, ["business_forum", "marketplace"])
+
+  const conferenceOnly = validateAndMapRegistrationImportRow(
+    { ...validRow, AdditionalSessions: "REC26" },
+    {
+      templateType: REC_IMPORT_TEMPLATE_TYPES.STANDARD,
+      conferenceDays,
+      validCountries: ["Uganda"],
+    }
+  )
+  assert.equal(conferenceOnly.valid, true)
+  assert.deepEqual(conferenceOnly.payload.additionalSessions, [])
 })
 
-test("Business Forum badge titles apply only when that optional session is selected", () => {
-  const conference = { year: 2026, title: "Renewable Energy Conference & Expo 2026", shortName: "REC 2026" }
+test("badge title stays REC26 & Expo and the category sits under the QR as a tag", () => {
+  const conference = { year: 2026, title: "Renewable Energy Conference 2026 & Expo", shortName: "REC 2026" }
+  assert.equal(getRecBadgeConferenceTitle(conference), "REC26 & Expo")
   assert.equal(
-    getRecBadgeConferenceTitle(conference, { additionalSessions: [] }),
-    "Renewable Energy Conference & Expo 2026"
+    getRecBadgeConferenceTitle(conference, { additionalSessions: ["marketplace"] }),
+    "REC26 & Expo"
+  )
+  assert.equal(formatRecParticipantCategory({ additionalSessions: [] }, 2026), "REC26 & Expo")
+  assert.equal(formatRecParticipantCategory({ additionalSessions: ["business_forum"] }, 2026), "REC26 & UG-EU BF")
+  assert.equal(formatRecParticipantCategory({ additionalSessions: ["marketplace"] }, 2026), "REC26 & AEMP")
+  assert.equal(
+    formatRecParticipantCategory({ additionalSessions: ["business_forum", "marketplace"] }, 2026),
+    "REC26, UG-EU BF & AEMP"
   )
   assert.equal(
-    getRecBadgeConferenceTitle(conference, { additionalSessions: ["business_forum"] }),
-    "REC 2026 & Expo | Business Forum"
+    formatRecParticipantCategoryTag({ additionalSessions: ["business_forum"] }, 2026),
+    "#REC26 & UG-EU BF"
   )
+  assert.equal(getRecParticipantCategoryDirection({ additionalSessions: [] }), "Main conference and Expo")
+  assert.equal(
+    getRecParticipantCategoryDirection({ additionalSessions: ["marketplace"] }),
+    "African Energy Market Place"
+  )
+  assert.deepEqual(normalizeRecOptionalSessions("REC26 & Expo"), [])
+  assert.deepEqual(normalizeRecOptionalSessions("REC26 & UG-EU BF"), ["business_forum"])
+  assert.deepEqual(normalizeRecOptionalSessions("REC26 & AEMP"), ["marketplace"])
+  assert.deepEqual(normalizeRecOptionalSessions("African Energy Market Place"), ["marketplace"])
   assert.deepEqual(
-    normalizeRecOptionalSessions("Yes"),
-    ["business_forum"]
+    normalizeRecOptionalSessions("Business Forum / Marketplace"),
+    ["business_forum", "marketplace"]
   )
+})
+
+test("participant category copy tells people to choose where they will be", () => {
+  assert.equal(getRecOptionalSessionCopy().intro, "Choose where you will be.")
+})
+
+test("registrations can be filtered by the four participant categories", () => {
+  const recOnly = { additionalSessions: [] }
+  const forum = { additionalSessions: ["business_forum"] }
+  const aemp = { additionalSessions: ["marketplace"] }
+  const both = { additionalSessions: ["business_forum", "marketplace"] }
+  const missing = { additionalSessions: null }
+
+  assert.equal(registrationMatchesParticipantCategory(recOnly, ""), true)
+  assert.equal(registrationMatchesParticipantCategory(recOnly, "rec"), true)
+  assert.equal(registrationMatchesParticipantCategory(missing, "rec"), true)
+  assert.equal(registrationMatchesParticipantCategory(forum, "ug_eu_bf"), true)
+  assert.equal(registrationMatchesParticipantCategory(both, "ug_eu_bf"), false)
+  assert.equal(registrationMatchesParticipantCategory(aemp, "aemp"), true)
+  assert.equal(registrationMatchesParticipantCategory(both, "ug_eu_bf_aemp"), true)
+  assert.equal(registrationMatchesParticipantCategory(forum, "ug_eu_bf_aemp"), false)
+
+  assert.deepEqual(recParticipantCategoryQueryPlan("rec"), {
+    isNullAttribute: "additionalSessions",
+    contains: [],
+    notContains: [],
+  })
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf").contains, ["business_forum"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf").notContains, ["marketplace"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("aemp").contains, ["marketplace"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("aemp").notContains, ["business_forum"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf_aemp").contains, ["business_forum", "marketplace"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf_aemp").notContains, [])
+  assert.equal(recParticipantCategoryQueryPlan(""), null)
+
+  const queries = []
+  applyRecParticipantCategoryQueries({
+    contains: (attribute, value) => ["contains", attribute, value],
+    notContains: (attribute, value) => ["notContains", attribute, value],
+    isNull: (attribute) => ["isNull", attribute],
+  }, queries, "ug_eu_bf")
+  assert.deepEqual(queries, [
+    ["contains", "additionalSessions", "business_forum"],
+    ["notContains", "additionalSessions", "marketplace"],
+  ])
 })

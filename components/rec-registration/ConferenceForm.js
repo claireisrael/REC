@@ -17,6 +17,7 @@ import {
   faTrash
 } from "@fortawesome/free-solid-svg-icons"
 import SponsorSetupEditor from "./SponsorSetupEditor"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 
 const EDITOR_SECTIONS = [
   {
@@ -596,7 +597,7 @@ export default function ConferenceForm({
               type="text"
               value={formData.shortName || ""}
               onChange={(e) => handleInputChange("shortName", e.target.value)}
-              placeholder="e.g. NREP"
+              placeholder="e.g. REC26"
             />
           </Form.Group>
         </Col>
@@ -945,7 +946,7 @@ export default function ConferenceForm({
       <div className="rec-editor-shell">
         <aside className="rec-editor-nav" aria-label="Conference editor sections">
           <div className="rec-editor-nav-title">
-            <strong>{formData.title || `REC ${formData.year}`}</strong>
+            <strong>{formData.title || formatRecEdition(formData.year)}</strong>
             <span>{registrationMode}</span>
           </div>
           <div className="rec-editor-nav-list">
@@ -999,7 +1000,7 @@ export default function ConferenceForm({
 
       <div className="rec-editor-savebar">
         <div className="rec-editor-savebar-copy">
-          <strong>{formData.title || `REC ${formData.year}`}</strong>
+          <strong>{formData.title || formatRecEdition(formData.year)}</strong>
           <span>{activeSectionMeta.label} - {filledDays} day{filledDays === 1 ? "" : "s"}, {visibleSponsors} sponsor{visibleSponsors === 1 ? "" : "s"}</span>
         </div>
         <div className="rec-editor-savebar-actions">

@@ -4,7 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Query } from "appwrite"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAppwrite } from "@/lib/appwrite/provider"
-import { formatRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import { getRecBadgeViewPath } from "@/lib/rec-conference/scanning-rules.mjs"
+import {
+  applyRecParticipantCategoryQueries,
+  formatRecOptionalSessions,
+  recParticipantCategoryFilterOptions,
+  registrationMatchesParticipantCategory,
+} from "@/lib/rec-conference/registration-tracks.mjs"
 import {
   deleteRecRegistration,
   getRecRegistrationsByYear,
@@ -33,7 +40,8 @@ import {
   faTrash,
   faUsers,
 } from "@fortawesome/free-solid-svg-icons"
-import { formatAppwriteDate } from "@/lib/utils"
+import { formatAppwriteDateTime, getRegistrationTimestamp } from "@/lib/utils"
+import RecPrintableBadge from "@/components/rec-registration/RecPrintableBadge"
 
 const pageSizeOptions = [10, 25, 50, 100]
 const registrationTypeOptions = ["Attendee", "Exhibitor", "Sponsor"]
@@ -49,6 +57,7 @@ const emptyStats = {
 
 const defaultFilters = {
   registrationType: "",
+  participantCategory: "",
   daysAttending: "",
   sector: "",
   sponsorOrganization: "",
@@ -150,8 +159,11 @@ export default function RecRegistrationsList() {
 
   const totalPages = Math.max(1, Math.ceil(totalRegistrations / pageSize))
   const visibleRegistrations = useMemo(
-    () => registrations.filter((registration) => registrationMatchesSearch(registration, searchTerm)),
-    [registrations, searchTerm]
+    () => registrations.filter((registration) => (
+      registrationMatchesSearch(registration, searchTerm)
+      && registrationMatchesParticipantCategory(registration, filters.participantCategory)
+    )),
+    [filters.participantCategory, registrations, searchTerm]
   )
 
   const dayOptions = useMemo(() => {
@@ -166,6 +178,11 @@ export default function RecRegistrationsList() {
     )
   }, [registrations, selectedConference])
 
+  const categoryOptions = useMemo(
+    () => recParticipantCategoryFilterOptions(selectedYear),
+    [selectedYear]
+  )
+
   const sponsorOptions = useMemo(
     () => Object.keys(stats.bySponsor || {}).sort((a, b) => a.localeCompare(b)),
     [stats.bySponsor]
@@ -174,6 +191,7 @@ export default function RecRegistrationsList() {
   const buildListQueries = useCallback(() => {
     const queries = []
     if (filters.registrationType) queries.push(Query.equal("registrationType", filters.registrationType))
+    applyRecParticipantCategoryQueries(Query, queries, filters.participantCategory)
     if (filters.daysAttending) queries.push(Query.contains("daysAttending", filters.daysAttending))
     if (filters.sector) queries.push(Query.contains("sector", filters.sector))
     if (filters.sponsorOrganization) {
@@ -220,7 +238,11 @@ export default function RecRegistrationsList() {
           offset
         )
 
-        const rows = response.documents || []
+        const rows = [...(response.documents || [])].sort((a, b) => {
+          const aTime = Date.parse(getRegistrationTimestamp(a) || 0)
+          const bTime = Date.parse(getRegistrationTimestamp(b) || 0)
+          return bTime - aTime
+        })
         setRegistrations(rows)
         setTotalRegistrations(response.total || 0)
 
@@ -404,7 +426,10 @@ export default function RecRegistrationsList() {
         offset += pageSizeForExport
       } while (rows.length < total)
 
-      const exportRows = rows.filter((registration) => registrationMatchesSearch(registration, searchTerm))
+      const exportRows = rows.filter((registration) => (
+        registrationMatchesSearch(registration, searchTerm)
+        && registrationMatchesParticipantCategory(registration, filters.participantCategory)
+      ))
       const headers = [
         "Email",
         "Name",
@@ -415,7 +440,7 @@ export default function RecRegistrationsList() {
         "Coupon Code",
         "Registration Type",
         "Days Attending",
-        "Additional Sessions",
+        "Participant Category",
         "Country",
         "Phone",
         "Visa Letter Required",
@@ -433,12 +458,12 @@ export default function RecRegistrationsList() {
         registration.coupon,
         registration.registrationType,
         Array.isArray(registration.daysAttending) ? registration.daysAttending.join(", ") : "",
-        formatRecOptionalSessions(registration.additionalSessions).join(", "),
+        formatRecOptionalSessions(registration.additionalSessions, selectedYear).join(", "),
         registration.country,
         registration.phone,
         registration.visaLetterRequired ? "Yes" : "No",
-        Array.isArray(registration.conferenceYears) ? registration.conferenceYears.join(", ") : "",
-        formatAppwriteDate(registration.$createdAt),
+        Array.isArray(registration.conferenceYears) ? registration.conferenceYears.map(formatRecEdition).join(", ") : "",
+        formatAppwriteDateTime(getRegistrationTimestamp(registration)),
       ])
 
       const escapeCsv = (field) => `"${String(field || "").replaceAll('"', '""')}"`
@@ -499,7 +524,7 @@ export default function RecRegistrationsList() {
           <div>
             <h3 className="rec-panel-title">
               <FontAwesomeIcon icon={faUsers} />
-              REC {selectedYear || ""} registrants
+              {formatRecEdition(selectedYear)} registrants
             </h3>
             <p className="rec-muted mb-0 mt-1">
               Appwrite handles year and structured filters. Search narrows the currently loaded page.
@@ -557,7 +582,7 @@ export default function RecRegistrationsList() {
               >
                 {conferences.map((conference) => (
                   <option key={conference.$id || conference.year} value={conference.year}>
-                    REC {conference.year} {conference.isActive ? "(Active)" : ""}
+                    {formatRecEdition(conference.year)} {conference.isActive ? "(Active)" : ""}
                   </option>
                 ))}
               </select>
@@ -574,6 +599,21 @@ export default function RecRegistrationsList() {
                 <option value="">All Types</option>
                 {registrationTypeOptions.map((type) => (
                   <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="rec-field">
+              <label className="rec-label" htmlFor="registration-category-filter">Category</label>
+              <select
+                id="registration-category-filter"
+                className="rec-select"
+                value={filters.participantCategory}
+                onChange={(event) => handleFilterChange("participantCategory", event.target.value)}
+              >
+                <option value="">All categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category.value} value={category.value}>{category.label}</option>
                 ))}
               </select>
             </div>
@@ -756,7 +796,7 @@ export default function RecRegistrationsList() {
                             <span className="rec-chip">+{registration.daysAttending.length - 2}</span>
                           )}
                           {!registration.daysAttending?.length && <span className="rec-muted">No days</span>}
-                          {formatRecOptionalSessions(registration.additionalSessions).map((session) => (
+                          {formatRecOptionalSessions(registration.additionalSessions, selectedYear).map((session) => (
                             <span key={session} className="rec-chip">{session}</span>
                           ))}
                         </div>
@@ -767,7 +807,7 @@ export default function RecRegistrationsList() {
                         </span>
                       </td>
                       <td data-label="Registered" className="rec-muted">
-                        {formatAppwriteDate(registration.$createdAt)}
+                        {formatAppwriteDateTime(getRegistrationTimestamp(registration))}
                       </td>
                       <td data-label="Actions">
                         <div className="rec-row-actions">
@@ -871,7 +911,7 @@ export default function RecRegistrationsList() {
           }
         >
           <p>
-            Remove this registrant from REC {selectedYear}? If this is their only conference year, the full registration row will be deleted.
+            Remove this registrant from {formatRecEdition(selectedYear)}? If this is their only conference year, the full registration row will be deleted.
           </p>
           <div className="rec-empty-state-compact text-start">
             <div><strong>Name:</strong> {getRegistrantName(selectedRegistration)}</div>
@@ -883,17 +923,22 @@ export default function RecRegistrationsList() {
 
       {showBadgeModal && selectedRegistration && (
         <RegistrationModal
-          title="Badge QR"
+          title="Printable badge"
           onClose={() => !badgeLoading && setShowBadgeModal(false)}
           footer={
             <>
               <button type="button" className="rec-btn rec-btn-outline" disabled={badgeLoading} onClick={() => setShowBadgeModal(false)}>
                 Close
               </button>
-              {badgeDetails?.qrDataUrl && (
-                <a className="rec-btn rec-btn-primary" href={badgeDetails.qrDataUrl} download={`rec-${selectedYear}-${selectedRegistration.email}-badge-qr.png`}>
+              {badgeDetails?.badgeUrl && (
+                <a
+                  className="rec-btn rec-btn-primary"
+                  href={getRecBadgeViewPath(badgeDetails.badgeUrl) || badgeDetails.badgeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <FontAwesomeIcon icon={faIdBadge} />
-                  Download QR
+                  Print badge
                 </a>
               )}
             </>
@@ -905,21 +950,8 @@ export default function RecRegistrationsList() {
               <p className="mt-3">Issuing secure badge QR...</p>
             </div>
           ) : badgeDetails ? (
-            <div className="rec-badge-preview">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={badgeDetails.qrDataUrl} alt={`Badge QR for ${getRegistrantName(selectedRegistration)}`} />
-              <div>
-                <h4>{getRegistrantName(selectedRegistration)}</h4>
-                <p className="rec-muted mb-2">{selectedRegistration.email}</p>
-                <p className="rec-muted mb-0">
-                  {badgeDetails.conference?.title || `REC ${selectedYear}`} · issued {formatAppwriteDate(badgeDetails.issuedAt, "long")}
-                </p>
-                {badgeDetails.badgeUrl && (
-                  <a className="rec-inline-link mt-2" href={badgeDetails.badgeUrl} target="_blank" rel="noopener noreferrer">
-                    Open digital badge
-                  </a>
-                )}
-              </div>
+            <div className="rec-badge-preview rec-badge-preview-print">
+              <RecPrintableBadge badge={badgeDetails} />
             </div>
           ) : (
             <p className="mb-0">No badge QR was generated.</p>
@@ -971,10 +1003,10 @@ function RegistrationDetails({ registration, selectedYear }) {
       <div className="rec-detail-card">
         <h4>Registration</h4>
         <DetailField label="Type" value={registration.registrationType} />
-        <DetailField label="Selected Year" value={`REC ${selectedYear}`} />
-        <DetailField label="Conference Years" value={Array.isArray(registration.conferenceYears) ? registration.conferenceYears.join(", ") : ""} />
+        <DetailField label="Selected Year" value={formatRecEdition(selectedYear)} />
+        <DetailField label="Conference Years" value={Array.isArray(registration.conferenceYears) ? registration.conferenceYears.map(formatRecEdition).join(", ") : ""} />
         <DetailField label="Days Attending" value={Array.isArray(registration.daysAttending) ? registration.daysAttending.join(", ") : ""} />
-        <DetailField label="Additional Sessions" value={formatRecOptionalSessions(registration.additionalSessions).join(", ") || "None selected"} />
+        <DetailField label="Participant category" value={formatRecOptionalSessions(registration.additionalSessions, selectedYear).join(", ")} />
         {registration.registrationType === "Exhibitor" && (
           <DetailField label="Exhibition Details" value={registration.exhibitionDetails} />
         )}
@@ -985,9 +1017,9 @@ function RegistrationDetails({ registration, selectedYear }) {
         <DetailField label="Visa Letter" value={registration.visaLetterRequired ? "Required" : "Not required"} />
         {registration.visaLetterRequired && <DetailField label="Passport Number" value={registration.passportNumber} />}
         <DetailField label="Comments" value={registration.additionalComments} />
-        <DetailField label="Registered" value={formatAppwriteDate(registration.$createdAt, "long")} />
-        {registration.$updatedAt !== registration.$createdAt && (
-          <DetailField label="Last Updated" value={formatAppwriteDate(registration.$updatedAt, "long")} />
+        <DetailField label="Registered" value={formatAppwriteDateTime(getRegistrationTimestamp(registration))} />
+        {registration.$createdAt && registration.$updatedAt && registration.$updatedAt !== registration.$createdAt && (
+          <DetailField label="First created" value={formatAppwriteDateTime(registration.$createdAt)} />
         )}
       </div>
     </div>

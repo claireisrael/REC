@@ -22,7 +22,12 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import { useAuth } from "@/lib/auth/auth-provider"
 import { paginateRecAnalyticsRows } from "@/lib/rec-conference/scanning-analytics.mjs"
-import { formatRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
+import {
+  formatRecOptionalSessions,
+  formatRecParticipantCategory,
+  recParticipantCategoryFilterOptions,
+} from "@/lib/rec-conference/registration-tracks.mjs"
+import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 
 const emptyOverview = {
   summary: {},
@@ -284,6 +289,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
   const [attendeeSearch, setAttendeeSearch] = useState("")
   const [attendanceFilter, setAttendanceFilter] = useState("all")
   const [registrationTypeFilter, setRegistrationTypeFilter] = useState("")
+  const [participantCategoryFilter, setParticipantCategoryFilter] = useState("")
 
   const [scanPage, setScanPage] = useState(emptyPage)
   const [scanPageNumber, setScanPageNumber] = useState(1)
@@ -321,8 +327,9 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
     if (attendeeSearch) params.set("search", attendeeSearch)
     if (attendanceFilter !== "all") params.set("attendance", attendanceFilter)
     if (registrationTypeFilter) params.set("registrationType", registrationTypeFilter)
+    if (participantCategoryFilter) params.set("participantCategory", participantCategoryFilter)
     return `/api/rec/scanning/analytics/export?${params.toString()}`
-  }, [attendanceFilter, attendeeSearch, registrationTypeFilter, reportParams])
+  }, [attendanceFilter, attendeeSearch, participantCategoryFilter, registrationTypeFilter, reportParams])
 
   const scanExportHref = useMemo(() => {
     const params = new URLSearchParams(reportParams)
@@ -398,6 +405,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
         params.set("attendance", attendanceFilter)
         if (attendeeSearch) params.set("search", attendeeSearch)
         if (registrationTypeFilter) params.set("registrationType", registrationTypeFilter)
+        if (participantCategoryFilter) params.set("participantCategory", participantCategoryFilter)
         const data = await fetchJson(`/api/rec/scanning/analytics/registrants?${params.toString()}`, {
           signal: controller.signal,
         })
@@ -411,7 +419,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
 
     loadAttendees()
     return () => controller.abort()
-  }, [activeDataset, attendanceFilter, attendeePageNumber, attendeeSearch, conferenceId, refreshKey, registrationTypeFilter, reportParams])
+  }, [activeDataset, attendanceFilter, attendeePageNumber, attendeeSearch, conferenceId, participantCategoryFilter, refreshKey, registrationTypeFilter, reportParams])
 
   useEffect(() => {
     if (!conferenceId || activeDataset !== "scan_log") return
@@ -577,7 +585,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
               >
                 {conferences.map((conference) => (
                   <option key={conference.$id} value={conference.$id}>
-                    {conference.title || `REC ${conference.year}`} {conference.isActive ? "(Active)" : ""}
+                    {conference.title || formatRecEdition(conference.year)} {conference.isActive ? "(Active)" : ""}
                   </option>
                 ))}
               </select>
@@ -903,6 +911,23 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                       ))}
                     </select>
                   </div>
+                  <div className="rec-field">
+                    <label className="rec-label" htmlFor="attendance-category">Category</label>
+                    <select
+                      id="attendance-category"
+                      className="rec-select"
+                      value={participantCategoryFilter}
+                      onChange={(event) => {
+                        setParticipantCategoryFilter(event.target.value)
+                        setAttendeePageNumber(1)
+                      }}
+                    >
+                      <option value="">All categories</option>
+                      {recParticipantCategoryFilterOptions(selectedConference?.year).map((category) => (
+                        <option key={category.value} value={category.value}>{category.label}</option>
+                      ))}
+                    </select>
+                  </div>
                   <a className="rec-btn rec-btn-outline" href={attendanceExportHref}>
                     <FontAwesomeIcon icon={faDownload} /> Export CSV
                   </a>
@@ -938,6 +963,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                           </td>
                           <td data-label="Registration">
                             {humanize(row.registrationType)}
+                            <small>{formatRecParticipantCategory(row, selectedConference?.year)}</small>
                             <small>{formatList(row.daysAttending)}</small>
                           </td>
                           <td data-label="Attendance">
@@ -946,8 +972,18 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                             </span>
                             <small>{row.acceptedScans} accepted / {row.rejectedScans} rejected</small>
                           </td>
-                          <td data-label="Events">{row.eventCount}</td>
-                          <td data-label="Last Scan">{formatDateTime(row.lastScanAt, "No accepted scan")}</td>
+                          <td data-label="Events">
+                            {row.lastScanEventName || row.eventsAttended?.[0]?.name || "No event scanned"}
+                            {row.eventsAttended?.length > 1 && (
+                              <small>
+                                {row.eventsAttended.slice(1).map((event) => event.name).join(" · ")}
+                              </small>
+                            )}
+                          </td>
+                          <td data-label="Last Scan">
+                            {row.lastScanAt ? formatDateTime(row.lastScanAt) : "No accepted scan"}
+                            {row.lastScanEventName && <small>{row.lastScanEventName}{row.lastScanVenue ? ` · ${row.lastScanVenue}` : ""}</small>}
+                          </td>
                         </tr>
                       ))}
                       {dataLoading && (
@@ -1069,7 +1105,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                           </td>
                           <td data-label="Scanner">
                             {row.scannerName}
-                            {row.deviceLabel && <small>{row.deviceLabel}</small>}
+                            {row.deviceLabel && row.deviceLabel !== row.scannerName && <small>{row.deviceLabel}</small>}
                           </td>
                         </tr>
                       ))}
@@ -1133,8 +1169,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                     <div className="rec-analytics-detail-summary">
                       <SummaryCard label="Accepted Scans" value={detailSummary.acceptedScans || 0} tone="success" />
                       <SummaryCard label="Rejected Scans" value={detailSummary.rejectedScans || 0} tone="danger" />
-                      <SummaryCard label="Events Attended" value={attendance.eventCount || 0} />
-                      <SummaryCard label="Last Scan" value={attendance.lastScanAt ? formatDateTime(attendance.lastScanAt) : "None"} tone="muted" />
+                      <SummaryCard label="Events Attended" value={attendance.lastScanEventName || attendance.eventCount || 0} detail={attendance.eventCount > 1 ? `${attendance.eventCount} events` : ""} />
+                      <SummaryCard label="Last Scan" value={attendance.lastScanAt ? formatDateTime(attendance.lastScanAt) : "None"} detail={attendance.lastScanEventName || ""} tone="muted" />
                     </div>
 
                     <div className="rec-analytics-detail-grid">
@@ -1156,8 +1192,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                         <h4>Registration</h4>
                         <DetailField label="Type" value={humanize(registration.registrationType)} />
                         <DetailField label="Days" value={formatList(registration.daysAttending)} />
-                        <DetailField label="Additional Sessions" value={formatList(formatRecOptionalSessions(registration.additionalSessions))} />
-                        <DetailField label="Conference Years" value={formatList(registration.conferenceYears)} />
+                        <DetailField label="Participant category" value={formatList(formatRecOptionalSessions(registration.additionalSessions, selectedConference?.year))} />
+                        <DetailField label="Conference Years" value={formatList((registration.conferenceYears || []).map(formatRecEdition))} />
                         <DetailField label="Registered" value={formatDateTime(registration.registeredAt)} />
                       </section>
                       <section className="rec-analytics-detail-section">
@@ -1209,7 +1245,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                                   </td>
                                   <td data-label="Scanner">
                                     {scan.scannerName}
-                                    {scan.deviceLabel && <small>{scan.deviceLabel}</small>}
+                                    {scan.deviceLabel && scan.deviceLabel !== scan.scannerName && <small>{scan.deviceLabel}</small>}
                                   </td>
                                 </tr>
                               ))}
