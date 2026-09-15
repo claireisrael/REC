@@ -49,6 +49,19 @@ function formatAlertTime(value) {
   return date.toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Kampala" })
 }
 
+function formatScanTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  return date.toLocaleString("en-UG", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Kampala" })
+}
+
+function scanStatusLabel(status) {
+  if (status === "accepted") return "Accepted"
+  if (status === "duplicate") return "Duplicate"
+  if (status === "rejected") return "Rejected"
+  return status || "Unknown"
+}
+
 export default function RecScannerMePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -104,7 +117,7 @@ export default function RecScannerMePage() {
 
   useEffect(() => {
     load()
-    const timer = window.setInterval(load, 30000)
+    const timer = window.setInterval(load, 12000)
     return () => window.clearInterval(timer)
   }, [load])
 
@@ -217,6 +230,52 @@ export default function RecScannerMePage() {
             ? `You're ranked #${stats.rank} of ${stats.totalScanners} scanner${stats.totalScanners === 1 ? "" : "s"} today.`
             : "You haven't recorded a scan yet."}
         </p>
+
+        <div className="rec-scanner-me-scans">
+          <div className="rec-scanner-me-scans-head">
+            <h2>Your scans so far</h2>
+            <span>{stats?.recentScans?.length || 0} shown</span>
+          </div>
+          <div className="rec-scanner-me-scans-table-wrap">
+            <table className="rec-scanner-me-scans-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Time</th>
+                  <th>Registrant</th>
+                  <th>Event</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats?.recentScans?.length ? (
+                  stats.recentScans.map((scan, index) => (
+                    <tr key={scan.scanId}>
+                      <td>{index + 1}</td>
+                      <td>{formatScanTime(scan.scannedAt)}</td>
+                      <td>
+                        {scan.registrantName || "—"}
+                        {scan.organization && <small>{scan.organization}</small>}
+                      </td>
+                      <td>{scan.eventName || "—"}</td>
+                      <td>
+                        <span className={`rec-scanner-me-scan-pill rec-scanner-me-scan-pill-${scan.status}`}>
+                          {scanStatusLabel(scan.status)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="rec-scanner-me-scans-empty">
+                      No scans recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <button type="button" className="rec-scanner-auth-signout" onClick={signOut}>
           Sign out

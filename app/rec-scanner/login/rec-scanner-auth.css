@@ -30,7 +30,7 @@
 }
 
 .rec-scanner-auth-card-wide {
-  max-width: 460px;
+  max-width: 560px;
 }
 
 .rec-scanner-auth-kicker {
@@ -242,6 +242,102 @@
 @keyframes rec-scanner-toast-in {
   from { opacity: 0; transform: translate(-50%, -12px); }
   to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.rec-scanner-me-scans {
+  margin: 0 0 20px;
+}
+
+.rec-scanner-me-scans-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.rec-scanner-me-scans-head h2 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #14301f;
+}
+
+.rec-scanner-me-scans-head span {
+  font-size: 0.72rem;
+  color: #5d6b62;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rec-scanner-me-scans-table-wrap {
+  border: 1px solid #dbe6dc;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.rec-scanner-me-scans-table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.rec-scanner-me-scans-table th,
+.rec-scanner-me-scans-table td {
+  padding: 9px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eaf1ea;
+  vertical-align: top;
+}
+
+.rec-scanner-me-scans-table th {
+  background: #f4faf5;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4d6a57;
+}
+
+.rec-scanner-me-scans-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.rec-scanner-me-scans-table td small {
+  display: block;
+  color: #5d6b62;
+  font-size: 0.74rem;
+}
+
+.rec-scanner-me-scans-empty {
+  text-align: center !important;
+  color: #5d6b62;
+  padding: 18px 10px !important;
+}
+
+.rec-scanner-me-scan-pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.rec-scanner-me-scan-pill-accepted {
+  background: #e4f5ea;
+  color: #147a44;
+}
+
+.rec-scanner-me-scan-pill-duplicate {
+  background: #fdf0dd;
+  color: #a5610f;
+}
+
+.rec-scanner-me-scan-pill-rejected {
+  background: #fdecea;
+  color: #a52216;
 }
 
 .rec-scanner-auth-signout {
