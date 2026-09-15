@@ -146,9 +146,28 @@ export default function RecScannerPage() {
   const alertSeenRef = useRef(new Set())
   const alertSinceRef = useRef("")
   const alertTimerRef = useRef(null)
+  const stationTokenRef = useRef("")
 
   const focusCapture = useCallback(() => {
     inputRef.current?.focus()
+  }, [])
+
+  const resetStationState = useCallback((message = "") => {
+    stationTokenRef.current = ""
+    setSerialNumber("")
+    setAllocation(null)
+    setFeedback(null)
+    setScanRows([])
+    window.sessionStorage.removeItem(STATION_STORAGE_KEY)
+    alertQueueRef.current = []
+    alertSeenRef.current = new Set()
+    if (alertTimerRef.current) {
+      window.clearTimeout(alertTimerRef.current)
+      alertTimerRef.current = null
+    }
+    setCrossStationAlert(null)
+    setTally(null)
+    setHandshakeError(message)
   }, [])
 
   const unlockStation = useCallback(async (serial) => {
@@ -163,6 +182,10 @@ export default function RecScannerPage() {
       if (!response.ok) {
         throw new Error(payload.error || HID_SCAN_CODES.DEVICE_UNREGISTERED)
       }
+      if (!payload.station?.token) {
+        throw new Error(HID_SCAN_CODES.DEVICE_UNREGISTERED)
+      }
+      stationTokenRef.current = payload.station.token
       setSerialNumber(serial)
       setAllocation({
         ...(payload.allocation || {}),
@@ -186,11 +209,21 @@ export default function RecScannerPage() {
     try {
       const response = await fetch("/api/v1/rec/scanner/scans", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(stationTokenRef.current ? { Authorization: `Bearer ${stationTokenRef.current}` } : {}),
+        },
         cache: "no-store",
         body: JSON.stringify({ serialNumber, qrData }),
       })
       const payload = await response.json().catch(() => ({}))
+
+      if (response.status === 401) {
+        playRejectBuzz()
+        resetStationState("SESSION EXPIRED - SCAN THE STATION QR AGAIN")
+        return
+      }
+
       const row = scanRowFromPayload(
         payload,
         payload.error || payload.code || "SCAN REJECTED"
@@ -226,7 +259,7 @@ export default function RecScannerPage() {
       submittingRef.current = false
       focusCapture()
     }
-  }, [focusCapture, serialNumber])
+  }, [focusCapture, resetStationState, serialNumber])
 
   const advanceAlertQueue = useCallback(() => {
     const next = alertQueueRef.current.shift()
@@ -246,12 +279,14 @@ export default function RecScannerPage() {
   }, [advanceAlertQueue])
 
   const pollCrossStationAlerts = useCallback(async () => {
-    if (!serialNumber) return
+    if (!serialNumber || !stationTokenRef.current) return
     try {
       const response = await fetch(
-        `/api/v1/rec/scanner/alerts?serialNumber=${encodeURIComponent(serialNumber)}`
-        + `&since=${encodeURIComponent(alertSinceRef.current)}`,
-        { cache: "no-store" }
+        `/api/v1/rec/scanner/alerts?since=${encodeURIComponent(alertSinceRef.current)}`,
+        {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${stationTokenRef.current}` },
+        }
       )
       if (!response.ok) return
       const payload = await response.json().catch(() => ({}))
@@ -267,12 +302,12 @@ export default function RecScannerPage() {
   }, [enqueueCrossStationAlerts, serialNumber])
 
   const fetchTally = useCallback(async () => {
-    if (!serialNumber) return
+    if (!serialNumber || !stationTokenRef.current) return
     try {
-      const response = await fetch(
-        `/api/v1/rec/scanner/tally?serialNumber=${encodeURIComponent(serialNumber)}`,
-        { cache: "no-store" }
-      )
+      const response = await fetch("/api/v1/rec/scanner/tally", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${stationTokenRef.current}` },
+      })
       if (!response.ok) return
       const payload = await response.json().catch(() => ({}))
       setTally(payload)
@@ -382,20 +417,7 @@ export default function RecScannerPage() {
   }, [consumeSweep])
 
   const lockStation = () => {
-    setSerialNumber("")
-    setAllocation(null)
-    setFeedback(null)
-    setScanRows([])
-    setHandshakeError("")
-    window.sessionStorage.removeItem(STATION_STORAGE_KEY)
-    alertQueueRef.current = []
-    alertSeenRef.current = new Set()
-    if (alertTimerRef.current) {
-      window.clearTimeout(alertTimerRef.current)
-      alertTimerRef.current = null
-    }
-    setCrossStationAlert(null)
-    setTally(null)
+    resetStationState("")
     focusCapture()
   }
 
