@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { setScannerToken } from "@/lib/rec-conference/scanner-session-client"
+import { markJustSignedIn, setScannerToken } from "@/lib/rec-conference/scanner-session-client"
 import "./rec-scanner-auth.css"
 
 export default function RecScannerLoginPage() {
@@ -100,6 +100,7 @@ export default function RecScannerLoginPage() {
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || "That code did not work.")
       setScannerToken(payload.token)
+      markJustSignedIn()
       router.push("/rec-scanner/me")
     } catch (err) {
       setError(err.message || "That code did not work.")

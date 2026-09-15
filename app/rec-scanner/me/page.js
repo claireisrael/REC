@@ -1,9 +1,53 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { clearScannerToken, getScannerToken, scannerFetch } from "@/lib/rec-conference/scanner-session-client"
+import {
+  clearScannerToken,
+  consumeJustSignedIn,
+  getScannerToken,
+  scannerFetch,
+} from "@/lib/rec-conference/scanner-session-client"
 import "../login/rec-scanner-auth.css"
+
+function playTone(frequency, durationMs, type = "sine") {
+  if (typeof window === "undefined") return
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextClass) return
+
+  const context = new AudioContextClass()
+  const oscillator = context.createOscillator()
+  const gain = context.createGain()
+  oscillator.type = type
+  oscillator.frequency.value = frequency
+  oscillator.connect(gain)
+  gain.connect(context.destination)
+  gain.gain.setValueAtTime(0.16, context.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + durationMs / 1000)
+  oscillator.start()
+  oscillator.stop(context.currentTime + durationMs / 1000)
+  oscillator.onended = () => context.close().catch(() => {})
+}
+
+function playWelcomeChime() {
+  playTone(880, 120, "sine")
+  window.setTimeout(() => playTone(1175, 140, "sine"), 130)
+}
+
+function playCrossAlertChime() {
+  playTone(660, 160, "triangle")
+  window.setTimeout(() => playTone(990, 160, "triangle"), 180)
+}
+
+function formatAlertLocation(alert) {
+  return alert?.eventName || alert?.venue || "another scan point"
+}
+
+function formatAlertTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Kampala" })
+}
 
 export default function RecScannerMePage() {
   const router = useRouter()
@@ -11,6 +55,13 @@ export default function RecScannerMePage() {
   const [error, setError] = useState("")
   const [profile, setProfile] = useState(null)
   const [stats, setStats] = useState(null)
+  const [welcome, setWelcome] = useState(false)
+  const [crossStationAlert, setCrossStationAlert] = useState(null)
+
+  const alertQueueRef = useRef([])
+  const alertSeenRef = useRef(new Set())
+  const alertSinceRef = useRef(new Date().toISOString())
+  const alertTimerRef = useRef(null)
 
   const load = useCallback(async () => {
     if (!getScannerToken()) {
@@ -39,11 +90,63 @@ export default function RecScannerMePage() {
     }
   }, [router])
 
+  // Shows the "you're signed in" toast exactly once, right after arriving
+  // here from a successful sign-in - not on every later refresh.
+  useEffect(() => {
+    if (consumeJustSignedIn()) {
+      setWelcome(true)
+      playWelcomeChime()
+      const timer = window.setTimeout(() => setWelcome(false), 4000)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [])
+
   useEffect(() => {
     load()
     const timer = window.setInterval(load, 30000)
     return () => window.clearInterval(timer)
   }, [load])
+
+  const advanceAlertQueue = useCallback(() => {
+    const next = alertQueueRef.current.shift()
+    setCrossStationAlert(next || null)
+    if (next) {
+      playCrossAlertChime()
+      alertTimerRef.current = window.setTimeout(advanceAlertQueue, 6000)
+    } else {
+      alertTimerRef.current = null
+    }
+  }, [])
+
+  const enqueueCrossStationAlerts = useCallback((alerts) => {
+    if (!alerts.length) return
+    alertQueueRef.current.push(...alerts)
+    if (!alertTimerRef.current) advanceAlertQueue()
+  }, [advanceAlertQueue])
+
+  const pollCrossStationAlerts = useCallback(async () => {
+    if (!getScannerToken()) return
+    try {
+      const response = await scannerFetch(`/api/v1/rec/scanner/alerts?since=${encodeURIComponent(alertSinceRef.current)}`)
+      if (!response.ok) return
+      const payload = await response.json().catch(() => ({}))
+      if (payload.now) alertSinceRef.current = payload.now
+      const incoming = Array.isArray(payload.alerts) ? payload.alerts : []
+      const fresh = incoming.filter((alert) => alert.id && !alertSeenRef.current.has(alert.id))
+      fresh.forEach((alert) => alertSeenRef.current.add(alert.id))
+      // API returns newest first; show oldest-first so the sequence makes sense.
+      if (fresh.length) enqueueCrossStationAlerts([...fresh].reverse())
+    } catch {
+      // Best-effort. A missed poll just gets picked up next tick.
+    }
+  }, [enqueueCrossStationAlerts])
+
+  useEffect(() => {
+    pollCrossStationAlerts()
+    const timer = window.setInterval(pollCrossStationAlerts, 6000)
+    return () => window.clearInterval(timer)
+  }, [pollCrossStationAlerts])
 
   const signOut = async () => {
     await scannerFetch("/api/v1/rec/scanner/auth/logout", { method: "POST" }).catch(() => {})
@@ -71,6 +174,22 @@ export default function RecScannerMePage() {
 
   return (
     <div className="rec-scanner-auth">
+      {welcome && (
+        <div className="rec-scanner-welcome-toast" role="status">
+          Signed in as {profile?.operator?.name || "scanner"} ✓
+        </div>
+      )}
+
+      {crossStationAlert && (
+        <div className="rec-scanner-cross-alert" role="alert">
+          <strong>⚠ Badge re-scanned elsewhere</strong>
+          <p>
+            Already used at {formatAlertLocation(crossStationAlert)}
+            {crossStationAlert.scannedAt ? ` · ${formatAlertTime(crossStationAlert.scannedAt)}` : ""}
+          </p>
+        </div>
+      )}
+
       <div className="rec-scanner-auth-card rec-scanner-auth-card-wide">
         <p className="rec-scanner-auth-kicker">
           {profile?.conference?.title || profile?.conference?.shortName || "REC Scanner"}
