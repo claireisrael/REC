@@ -375,6 +375,36 @@
   opacity: 0.92;
 }
 
+.rec-station-tally {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rec-station-tally div {
+  background: #0c1c14;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.rec-station-tally strong {
+  display: block;
+  font-size: clamp(1.1rem, 2.4vw, 1.6rem);
+  font-weight: 800;
+  color: #fff;
+}
+
+.rec-station-tally span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9fb3a7;
+}
+
 .rec-station-body {
   flex: 1;
   padding: 18px 22px 28px;

@@ -4,10 +4,12 @@ import {
   buildRecScanAlerts,
   buildRecScanAnalytics,
   buildRecScanLogRows,
+  buildRecScannerLeaderboard,
   buildRecScanRegistrantRows,
   filterRecScanLogRows,
   filterRecScanRegistrantRows,
   formatRecScanAlert,
+  getRecScannerRankInfo,
   paginateRecAnalyticsRows,
   rowsToRecAnalyticsCsv,
 } from "../lib/rec-conference/scanning-analytics.mjs"
@@ -191,6 +193,25 @@ test("analytics CSV output neutralizes spreadsheet formulas", () => {
   )
   assert.match(csv, /^Name,Organization\r\n"'/)
   assert.match(csv, /"NREP, Uganda"/)
+})
+
+test("scanner leaderboard ranks by accepted scans and a scanner can find their own place", () => {
+  const leaderboard = buildRecScannerLeaderboard(scans)
+  assert.deepEqual(leaderboard.map((item) => item.key), ["scanner:one", "scanner:two", "tera-operator-1"])
+  assert.equal(leaderboard.find((item) => item.key === "scanner:two").total, 2)
+  assert.equal(leaderboard.find((item) => item.key === "scanner:two").accepted, 1)
+
+  const mine = getRecScannerRankInfo(leaderboard, "tera-operator-1")
+  assert.equal(mine.rank, 3)
+  assert.equal(mine.totalScanners, 3)
+  assert.equal(mine.mine.accepted, 1)
+  // Only this scanner's own row comes back - the response never carries anyone else's row.
+  assert.equal(Object.keys(mine).includes("leaderboard"), false)
+
+  const unknown = getRecScannerRankInfo(leaderboard, "someone-else")
+  assert.equal(unknown.mine, null)
+  assert.equal(unknown.rank, null)
+  assert.equal(unknown.totalScanners, 3)
 })
 
 test("scan alerts never expose attendee-identifying fields", () => {

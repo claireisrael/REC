@@ -140,6 +140,7 @@ export default function RecScannerPage() {
   const [unlockCodes, setUnlockCodes] = useState([])
   const [clock, setClock] = useState("")
   const [crossStationAlert, setCrossStationAlert] = useState(null)
+  const [tally, setTally] = useState(null)
 
   const alertQueueRef = useRef([])
   const alertSeenRef = useRef(new Set())
@@ -265,6 +266,21 @@ export default function RecScannerPage() {
     }
   }, [enqueueCrossStationAlerts, serialNumber])
 
+  const fetchTally = useCallback(async () => {
+    if (!serialNumber) return
+    try {
+      const response = await fetch(
+        `/api/v1/rec/scanner/tally?serialNumber=${encodeURIComponent(serialNumber)}`,
+        { cache: "no-store" }
+      )
+      if (!response.ok) return
+      const payload = await response.json().catch(() => ({}))
+      setTally(payload)
+    } catch {
+      // Best-effort; keep showing the last known tally until the next tick.
+    }
+  }, [serialNumber])
+
   const consumeSweep = useCallback((value) => {
     const scanned = String(value || "").trim()
     if (!scanned) return
@@ -328,6 +344,16 @@ export default function RecScannerPage() {
   }, [pollCrossStationAlerts, serialNumber])
 
   useEffect(() => {
+    if (!serialNumber) {
+      setTally(null)
+      return undefined
+    }
+    fetchTally()
+    const timer = window.setInterval(fetchTally, 20000)
+    return () => window.clearInterval(timer)
+  }, [fetchTally, serialNumber])
+
+  useEffect(() => {
     const onKeyDown = (event) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return
       if (event.key === "Shift") return
@@ -369,6 +395,7 @@ export default function RecScannerPage() {
       alertTimerRef.current = null
     }
     setCrossStationAlert(null)
+    setTally(null)
     focusCapture()
   }
 
@@ -535,6 +562,27 @@ export default function RecScannerPage() {
               </>
             )}
           </div>
+
+          {tally?.summary && (
+            <div className="rec-station-tally" aria-label="Conference-wide sign-in tally">
+              <div>
+                <strong>{tally.summary.uniqueAttendees?.toLocaleString() ?? "—"}</strong>
+                <span>Signed in</span>
+              </div>
+              <div>
+                <strong>{tally.summary.registeredAttendees?.toLocaleString() ?? "—"}</strong>
+                <span>Registered</span>
+              </div>
+              <div>
+                <strong>{tally.summary.notYetScanned?.toLocaleString() ?? "—"}</strong>
+                <span>Not yet in</span>
+              </div>
+              <div>
+                <strong>{tally.summary.attendanceRate ?? 0}%</strong>
+                <span>Attendance</span>
+              </div>
+            </div>
+          )}
 
           <main className="rec-station-body">
             <div className="rec-station-body-top">
