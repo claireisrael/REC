@@ -15,6 +15,7 @@ export default function RecScannerLoginPage() {
   const [code, setCode] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [devOtpCode, setDevOtpCode] = useState("")
 
   const sendCode = async (selectedConferenceId) => {
     setError("")
@@ -30,6 +31,10 @@ export default function RecScannerLoginPage() {
       if (!response.ok) throw new Error(payload.error || "Could not send an access code.")
       setConferenceId(selectedConferenceId)
       setOtpId(payload.otpId)
+      // Only ever set when the server could not email the code (no email API
+      // configured in this environment) and is not running in production.
+      setDevOtpCode(payload.devOtpCode || "")
+      if (payload.devOtpCode) setCode(payload.devOtpCode)
       setStep("otp")
     } catch (err) {
       setError(err.message || "Could not send an access code.")
@@ -155,7 +160,14 @@ export default function RecScannerLoginPage() {
 
         {step === "otp" && (
           <form onSubmit={verifyCode}>
-            <p className="rec-scanner-auth-hint">We emailed a 6-digit code to {email}.</p>
+            {devOtpCode ? (
+              <div className="rec-scanner-auth-dev-otp">
+                <strong>TEST MODE - no email is configured here</strong>
+                <p>Your access code is <code>{devOtpCode}</code> (pre-filled below).</p>
+              </div>
+            ) : (
+              <p className="rec-scanner-auth-hint">We emailed a 6-digit code to {email}.</p>
+            )}
             <label htmlFor="scanner-code">Access code</label>
             <input
               id="scanner-code"

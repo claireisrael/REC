@@ -56,6 +56,33 @@
   line-height: 1.5;
 }
 
+.rec-scanner-auth-dev-otp {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed #c96d28;
+  background: #fdf4e7;
+  color: #7a4a12;
+}
+
+.rec-scanner-auth-dev-otp strong {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rec-scanner-auth-dev-otp p {
+  margin: 4px 0 0;
+  font-size: 0.88rem;
+}
+
+.rec-scanner-auth-dev-otp code {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
 .rec-scanner-auth-error {
   margin: 0 0 16px;
   padding: 10px 14px;
