@@ -85,6 +85,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #147A44;
+  -webkit-text-stroke: 0.4px currentColor;
 }
 
 .rec-print-badge-header h1 {
@@ -95,6 +96,7 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: #1f6b3a;
+  -webkit-text-stroke: 0.5px currentColor;
 }
 
 .rec-print-badge-hero {
@@ -111,7 +113,7 @@
   position: relative;
   z-index: 1;
   margin: 0;
-  font-size: 16pt;
+  font-size: 12.5pt;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
