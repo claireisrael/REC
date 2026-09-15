@@ -9,6 +9,7 @@ import {
   formatRecBadgeDisplayName,
   formatRecBadgeEditionLine,
   formatRecBadgeHashtag,
+  formatRecBadgeRoleLabel,
   formatRecBadgeTheme,
   formatRecBadgeVenue,
 } from "@/lib/rec-conference/rec-badge-display.mjs"
@@ -28,7 +29,7 @@ export default function RecPrintableBadge({
   const badgeNumber = badge?.badge?.badgeNumberLabel
     || badge?.badgeNumberLabel
     || ""
-  const role = String(registration.registrationType || "").trim()
+  const role = formatRecBadgeRoleLabel(registration.registrationType)
   const dateRange = formatRecBadgeDateRange(conference.startDate, conference.endDate, year)
   const venue = formatRecBadgeVenue(conference)
   const theme = formatRecBadgeTheme(conference)
