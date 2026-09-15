@@ -24,6 +24,7 @@ import {
   getTeraStationEventTypes,
   hidScanTypeToEventType,
   eventMatchesOperatorRestrictions,
+  venueMatchesAllowedList,
   isTeraScannerOperator,
   selectTeraScanEvent,
   teraOperatorEmail,
@@ -367,6 +368,28 @@ test("Tera barcode scanners are registered as operators with a stable device ema
       { allowedEventTypes: ["lunch"] }
     ),
     false
+  )
+})
+
+test("venue matching for scanner operators is case-insensitive and tolerates substrings", () => {
+  // The exact mismatch that silently blocked every scan for a live event:
+  // an operator allow-listed for "Main Entrance" against an event whose
+  // venue was typed as "main entrance".
+  assert.equal(venueMatchesAllowedList("main entrance", ["Main Entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Main Entrance", ["main entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Main Entrance - Gate B", ["Main Entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Katonga Hall", ["Main Entrance"]), false)
+  // No allow-list configured means no venue restriction at all.
+  assert.equal(venueMatchesAllowedList("Anywhere", []), true)
+  // An event with no venue set can't be excluded by a venue restriction.
+  assert.equal(venueMatchesAllowedList("", ["Main Entrance"]), true)
+
+  assert.equal(
+    eventMatchesOperatorRestrictions(
+      { $id: "strategy-1", type: "custom", venue: "main entrance" },
+      { allowedEventIds: ["strategy-1"], allowedEventTypes: ["custom"], allowedVenues: ["Main Entrance"] }
+    ),
+    true
   )
 })
 
