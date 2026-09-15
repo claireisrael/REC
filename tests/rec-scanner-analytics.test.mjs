@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  buildRecScanAlerts,
   buildRecScanAnalytics,
   buildRecScanLogRows,
   buildRecScanRegistrantRows,
   filterRecScanLogRows,
   filterRecScanRegistrantRows,
+  formatRecScanAlert,
   paginateRecAnalyticsRows,
   rowsToRecAnalyticsCsv,
 } from "../lib/rec-conference/scanning-analytics.mjs"
@@ -189,6 +191,57 @@ test("analytics CSV output neutralizes spreadsheet formulas", () => {
   )
   assert.match(csv, /^Name,Organization\r\n"'/)
   assert.match(csv, /"NREP, Uganda"/)
+})
+
+test("scan alerts never expose attendee-identifying fields", () => {
+  const scan = {
+    $id: "scan-dup-1",
+    status: "duplicate",
+    conferenceId: "conf-1",
+    eventId: "entry-day-1",
+    registrationId: "reg-1",
+    registrationEmail: "amina@example.com",
+    venue: "Main Gate",
+    scanType: "conference_entry",
+    day: 1,
+    scannedAt: "2026-10-19T09:05:00.000Z",
+  }
+
+  const alert = formatRecScanAlert(scan, events[0])
+  assert.deepEqual(alert, {
+    id: "scan-dup-1",
+    eventId: "entry-day-1",
+    eventName: "Main Entrance - Day 1",
+    venue: "Main Gate",
+    scanType: "conference_entry",
+    day: 1,
+    scannedAt: "2026-10-19T09:05:00.000Z",
+  })
+  assert.equal(Object.hasOwn(alert, "registrationId"), false)
+  assert.equal(Object.hasOwn(alert, "registrationEmail"), false)
+  assert.equal(Object.hasOwn(alert, "name"), false)
+})
+
+test("scan alerts fall back to the raw scan venue and type when the event is gone, and sort newest first", () => {
+  const alert = formatRecScanAlert({
+    $id: "scan-dup-2",
+    status: "duplicate",
+    venue: "Lunch Hall",
+    scanType: "lunch",
+    scannedAt: "2026-10-20T12:05:00.000Z",
+  }, null)
+  assert.equal(alert.eventName, "")
+  assert.equal(alert.venue, "Lunch Hall")
+  assert.equal(alert.scanType, "lunch")
+
+  const alerts = buildRecScanAlerts([
+    { $id: "a", status: "accepted", eventId: "entry-day-1", scannedAt: "2026-10-19T09:00:00.000Z" },
+    { $id: "b", status: "duplicate", eventId: "entry-day-1", scannedAt: "2026-10-19T09:05:00.000Z" },
+    { $id: "c", status: "duplicate", eventId: "lunch-day-2", scannedAt: "2026-10-19T09:10:00.000Z" },
+  ], events)
+
+  assert.deepEqual(alerts.map((item) => item.id), ["c", "b"])
+  assert.equal(alerts[0].eventName, "Lunch - Day 2")
 })
 
 test("analytics pagination bounds pages and preserves report totals", () => {

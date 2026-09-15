@@ -44,6 +44,11 @@ function playRejectBuzz() {
   playTone(220, 300, "square")
 }
 
+function playCrossAlertChime() {
+  playTone(660, 160, "triangle")
+  window.setTimeout(() => playTone(990, 160, "triangle"), 180)
+}
+
 function formatScanTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
@@ -52,6 +57,10 @@ function formatScanTime(value) {
     timeStyle: "medium",
     timeZone: "Africa/Kampala",
   })
+}
+
+function formatAlertLocation(alert) {
+  return alert?.eventName || alert?.venue || "another scan point"
 }
 
 function resultLabel(status) {
@@ -130,6 +139,12 @@ export default function RecScannerPage() {
   const [scanRows, setScanRows] = useState([])
   const [unlockCodes, setUnlockCodes] = useState([])
   const [clock, setClock] = useState("")
+  const [crossStationAlert, setCrossStationAlert] = useState(null)
+
+  const alertQueueRef = useRef([])
+  const alertSeenRef = useRef(new Set())
+  const alertSinceRef = useRef("")
+  const alertTimerRef = useRef(null)
 
   const focusCapture = useCallback(() => {
     inputRef.current?.focus()
@@ -212,6 +227,44 @@ export default function RecScannerPage() {
     }
   }, [focusCapture, serialNumber])
 
+  const advanceAlertQueue = useCallback(() => {
+    const next = alertQueueRef.current.shift()
+    setCrossStationAlert(next || null)
+    if (next) {
+      playCrossAlertChime()
+      alertTimerRef.current = window.setTimeout(advanceAlertQueue, 6000)
+    } else {
+      alertTimerRef.current = null
+    }
+  }, [])
+
+  const enqueueCrossStationAlerts = useCallback((alerts) => {
+    if (!alerts.length) return
+    alertQueueRef.current.push(...alerts)
+    if (!alertTimerRef.current) advanceAlertQueue()
+  }, [advanceAlertQueue])
+
+  const pollCrossStationAlerts = useCallback(async () => {
+    if (!serialNumber) return
+    try {
+      const response = await fetch(
+        `/api/v1/rec/scanner/alerts?serialNumber=${encodeURIComponent(serialNumber)}`
+        + `&since=${encodeURIComponent(alertSinceRef.current)}`,
+        { cache: "no-store" }
+      )
+      if (!response.ok) return
+      const payload = await response.json().catch(() => ({}))
+      if (payload.now) alertSinceRef.current = payload.now
+      const incoming = Array.isArray(payload.alerts) ? payload.alerts : []
+      const fresh = incoming.filter((alert) => alert.id && !alertSeenRef.current.has(alert.id))
+      fresh.forEach((alert) => alertSeenRef.current.add(alert.id))
+      // API returns newest first; show oldest-first so the sequence makes sense.
+      if (fresh.length) enqueueCrossStationAlerts([...fresh].reverse())
+    } catch {
+      // Best-effort. A missed poll just gets picked up next tick.
+    }
+  }, [enqueueCrossStationAlerts, serialNumber])
+
   const consumeSweep = useCallback((value) => {
     const scanned = String(value || "").trim()
     if (!scanned) return
@@ -266,6 +319,15 @@ export default function RecScannerPage() {
   }, [focusCapture, unlockStation])
 
   useEffect(() => {
+    if (!serialNumber) return undefined
+    alertSinceRef.current = new Date().toISOString()
+    alertSeenRef.current = new Set()
+    pollCrossStationAlerts()
+    const timer = window.setInterval(pollCrossStationAlerts, 6000)
+    return () => window.clearInterval(timer)
+  }, [pollCrossStationAlerts, serialNumber])
+
+  useEffect(() => {
     const onKeyDown = (event) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return
       if (event.key === "Shift") return
@@ -300,6 +362,13 @@ export default function RecScannerPage() {
     setScanRows([])
     setHandshakeError("")
     window.sessionStorage.removeItem(STATION_STORAGE_KEY)
+    alertQueueRef.current = []
+    alertSeenRef.current = new Set()
+    if (alertTimerRef.current) {
+      window.clearTimeout(alertTimerRef.current)
+      alertTimerRef.current = null
+    }
+    setCrossStationAlert(null)
     focusCapture()
   }
 
@@ -332,6 +401,18 @@ export default function RecScannerPage() {
         onBlur={focusCapture}
         readOnly
       />
+
+      {crossStationAlert && (
+        <div className="rec-station-cross-alert" role="alert">
+          <div>
+            <strong>⚠ Badge re-scanned elsewhere</strong>
+            <p>
+              Already used at {formatAlertLocation(crossStationAlert)}
+              {crossStationAlert.scannedAt ? ` · ${formatScanTime(crossStationAlert.scannedAt)}` : ""}
+            </p>
+          </div>
+        </div>
+      )}
 
       {locked ? (
         <>
