@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import {
   formatRecParticipantCategoryTag,
   getRecBadgeConferenceTitle,
@@ -16,6 +17,15 @@ import {
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import "./RecPrintableBadge.css"
 
+// The printed card is a fixed 100mm x 140mm with overflow hidden, so
+// content that runs long (a name or organization that wraps to a second
+// line) can silently get clipped at print time even though it looks fine
+// on screen, where the card is free to grow. 1mm = 96/25.4 CSS px - the
+// same ratio Chromium's print/PDF engine uses - so this is the real
+// physical budget regardless of screen DPI.
+const PRINT_CARD_HEIGHT_PX = 140 * (96 / 25.4)
+const NAME_MIN_FONT_PX = 11
+
 export default function RecPrintableBadge({
   badge,
   showActions = false,
@@ -24,6 +34,8 @@ export default function RecPrintableBadge({
   const registration = badge?.registration || {}
   const year = conference.year
   const displayName = formatRecBadgeDisplayName(registration)
+  const cardRef = useRef(null)
+  const nameRef = useRef(null)
   const tag = registration.participantCategoryTag
     || formatRecParticipantCategoryTag(registration, year)
   const badgeNumber = badge?.badge?.badgeNumberLabel
@@ -37,6 +49,23 @@ export default function RecPrintableBadge({
   const editionLine = formatRecBadgeEditionLine(year)
   const nrepLogo = conference.logoUrl || "/badge/nrep-mark.svg"
 
+  // Shrink-to-fit for the name only - it's the field most likely to run
+  // long (a title + given + other + last name), and the one place a couple
+  // of points of size makes the biggest difference to total card height.
+  useEffect(() => {
+    const card = cardRef.current
+    const name = nameRef.current
+    if (!card || !name) return
+    name.style.fontSize = ""
+    let guard = 0
+    while (card.scrollHeight > PRINT_CARD_HEIGHT_PX && guard < 14) {
+      const current = Number.parseFloat(getComputedStyle(name).fontSize)
+      if (!(current > NAME_MIN_FONT_PX)) break
+      name.style.fontSize = `${current - 1}px`
+      guard += 1
+    }
+  }, [displayName, badgeNumber, tag])
+
   return (
     <div className="rec-print-badge-wrap">
       {showActions && (
@@ -46,7 +75,7 @@ export default function RecPrintableBadge({
           </button>
         </div>
       )}
-      <article className="rec-print-badge" aria-label={`Printed badge for ${displayName}`}>
+      <article ref={cardRef} className="rec-print-badge" aria-label={`Printed badge for ${displayName}`}>
         <p className="rec-print-badge-edge">{hashtag}</p>
         <header className="rec-print-badge-header">
           <div className="rec-print-badge-logos">
@@ -68,7 +97,7 @@ export default function RecPrintableBadge({
         </div>
         <div className="rec-print-badge-body">
           <p className="rec-print-badge-theme">{theme}</p>
-          <p className="rec-print-badge-name">{displayName}</p>
+          <p ref={nameRef} className="rec-print-badge-name">{displayName}</p>
           {registration.organization && (
             <p className="rec-print-badge-org">{registration.organization}</p>
           )}
