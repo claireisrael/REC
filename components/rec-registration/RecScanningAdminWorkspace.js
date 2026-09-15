@@ -384,7 +384,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   })
   const [badgePage, setBadgePage] = useState(1)
   const [badgeLimit, setBadgeLimit] = useState(25)
-  const [badgeStatus, setBadgeStatus] = useState("without_badge")
+  const [badgeStatus, setBadgeStatus] = useState("all")
   const [badgeSearchInput, setBadgeSearchInput] = useState("")
   const [badgeSearch, setBadgeSearch] = useState("")
   const [selectedBadgeRegistrations, setSelectedBadgeRegistrations] = useState([])
