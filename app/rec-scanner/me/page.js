@@ -233,6 +233,51 @@ export default function RecScannerMePage() {
 
         <div className="rec-scanner-me-scans">
           <div className="rec-scanner-me-scans-head">
+            <h2>Scanner performance</h2>
+            <span>{stats?.leaderboard?.length || 0} active</span>
+          </div>
+          <div className="rec-scanner-me-scans-table-wrap">
+            <table className="rec-scanner-me-scans-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Scanner</th>
+                  <th>Accepted</th>
+                  <th>Rejected</th>
+                  <th>Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats?.leaderboard?.length ? (
+                  stats.leaderboard.map((scanner, index) => (
+                    <tr
+                      key={scanner.key}
+                      className={scanner.key === mine.key ? "rec-scanner-me-scans-mine" : ""}
+                    >
+                      <td>{index + 1}</td>
+                      <td>
+                        {scanner.name}
+                        {scanner.key === mine.key && <small>You</small>}
+                      </td>
+                      <td>{scanner.accepted}</td>
+                      <td>{scanner.rejected}</td>
+                      <td>{scanner.acceptanceRate}%</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="rec-scanner-me-scans-empty">
+                      No scans recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="rec-scanner-me-scans">
+          <div className="rec-scanner-me-scans-head">
             <h2>Your scans so far</h2>
             <span>{stats?.recentScans?.length || 0} shown</span>
           </div>

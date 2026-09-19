@@ -316,6 +316,28 @@
   padding: 18px 10px !important;
 }
 
+.rec-scanner-me-scans-mine {
+  background: #f4faf5;
+}
+
+.rec-scanner-me-scans-mine td:nth-child(2) {
+  font-weight: 800;
+  color: #147a44;
+}
+
+.rec-scanner-me-scans-mine small {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #147a44;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .rec-scanner-me-scan-pill {
   display: inline-block;
   padding: 3px 9px;
