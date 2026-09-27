@@ -6,6 +6,7 @@ import {
   formatRecBadgeEditionLine,
   formatRecBadgeHashtag,
   formatRecBadgeHonorific,
+  formatRecBadgeRoleLabel,
   formatRecBadgeTheme,
   formatRecBadgeVenue,
 } from "../lib/rec-conference/rec-badge-display.mjs"
@@ -47,4 +48,15 @@ test("REC26 badge copy uses the 2026 dates, venue, theme, and edition line", () 
   )
   assert.equal(formatRecBadgeEditionLine(2026), "2026 & Expo")
   assert.equal(formatRecBadgeHashtag(2026), "#REC26&EXPO")
+})
+
+test("the badge prints \"Delegate\" for attendee registrations, other types unchanged", () => {
+  // Display-only: the badge wording changes, but registrationType itself
+  // (used for scan eligibility, admin lists, exports) is untouched elsewhere.
+  assert.equal(formatRecBadgeRoleLabel("Attendee"), "Delegate")
+  assert.equal(formatRecBadgeRoleLabel("attendee"), "Delegate")
+  assert.equal(formatRecBadgeRoleLabel("Exhibitor"), "Exhibitor")
+  assert.equal(formatRecBadgeRoleLabel("Sponsor"), "Sponsor")
+  assert.equal(formatRecBadgeRoleLabel(""), "")
+  assert.equal(formatRecBadgeRoleLabel(null), "")
 })

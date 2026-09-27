@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import QRCode from "qrcode"
 import {
-  HID_KEYSTROKE_WINDOW_MS,
   HID_SCAN_CODES,
   REC_TERA_HW0009_DEPLOYMENTS,
   isTeraHardwareSerial,
@@ -12,6 +11,8 @@ import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import "./rec-scanner-station.css"
 
 const STATION_STORAGE_KEY = "rec.tera.station.serial"
+const HID_SWEEP_IDLE_MS = 500
+const MIN_HID_SWEEP_LENGTH = 8
 
 function playTone(frequency, durationMs, type = "sine") {
   if (typeof window === "undefined") return
@@ -40,8 +41,17 @@ function playSuccessBeep() {
   playTone(1320, 90, "sine")
 }
 
+function playDuplicateBeep() {
+  playTone(620, 170, "triangle")
+}
+
 function playRejectBuzz() {
   playTone(220, 300, "square")
+}
+
+function playCrossAlertChime() {
+  playTone(660, 160, "triangle")
+  window.setTimeout(() => playTone(990, 160, "triangle"), 180)
 }
 
 function formatScanTime(value) {
@@ -54,16 +64,22 @@ function formatScanTime(value) {
   })
 }
 
+function formatAlertLocation(alert) {
+  return alert?.eventName || alert?.venue || "another scan point"
+}
+
 function resultLabel(status) {
   if (status === "accepted") return "Accepted"
   if (status === "duplicate") return "Already scanned"
   if (status === "rejected") return "Rejected"
+  if (status === "unconfirmed") return "Unconfirmed"
   return status || "Unknown"
 }
 
 function resultClass(status) {
   if (status === "accepted") return "rec-station-pill rec-station-pill-ok"
   if (status === "duplicate") return "rec-station-pill rec-station-pill-duplicate"
+  if (status === "unconfirmed") return "rec-station-pill rec-station-pill-unconfirmed"
   return "rec-station-pill rec-station-pill-error"
 }
 
@@ -116,11 +132,31 @@ function scanRowFromPayload(payload, fallbackMessage = "") {
   }
 }
 
+function scanRowFromPersisted(scan) {
+  return {
+    id: scan.id,
+    scannedAt: scan.scannedAt,
+    name: "Badge scan",
+    email: "",
+    organization: "",
+    eventName: scan.eventName || "",
+    venue: scan.venue || "",
+    categoryTag: "",
+    categoryDirection: "",
+    status: scan.status || "rejected",
+    note: scan.reason && scan.reason !== "ok" ? String(scan.reason).replaceAll("_", " ") : "",
+  }
+}
+
 export default function RecScannerPage() {
   const inputRef = useRef(null)
   const bufferRef = useRef("")
-  const lastKeyAtRef = useRef(0)
-  const submittingRef = useRef(false)
+  const sweepSourceRef = useRef("")
+  const bufferTimerRef = useRef(null)
+  const lastSweepCompletedAtRef = useRef(0)
+  const scanQueueRef = useRef([])
+  const processingRef = useRef(false)
+  const stationGenerationRef = useRef(0)
 
   const [serialNumber, setSerialNumber] = useState("")
   const [allocation, setAllocation] = useState(null)
@@ -130,9 +166,53 @@ export default function RecScannerPage() {
   const [scanRows, setScanRows] = useState([])
   const [unlockCodes, setUnlockCodes] = useState([])
   const [clock, setClock] = useState("")
+  const [crossStationAlert, setCrossStationAlert] = useState(null)
+  const [tally, setTally] = useState(null)
+  const [pendingScans, setPendingScans] = useState(0)
+  const [captureStatus, setCaptureStatus] = useState("")
+  const [feedError, setFeedError] = useState("")
+  const [historyRefreshTick, setHistoryRefreshTick] = useState(0)
+
+  const alertQueueRef = useRef([])
+  const alertSeenRef = useRef(new Set())
+  const alertSinceRef = useRef("")
+  const alertTimerRef = useRef(null)
+  const stationTokenRef = useRef("")
+  const recentPollRef = useRef(false)
+  const recentRefreshPendingRef = useRef(false)
 
   const focusCapture = useCallback(() => {
-    inputRef.current?.focus()
+    inputRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  const resetStationState = useCallback((message = "") => {
+    if (bufferTimerRef.current) window.clearTimeout(bufferTimerRef.current)
+    bufferTimerRef.current = null
+    bufferRef.current = ""
+    sweepSourceRef.current = ""
+    lastSweepCompletedAtRef.current = 0
+    setCaptureStatus("")
+    stationGenerationRef.current += 1
+    scanQueueRef.current = []
+    setPendingScans(0)
+    stationTokenRef.current = ""
+    setSerialNumber("")
+    setAllocation(null)
+    setFeedback(null)
+    setScanRows([])
+    setFeedError("")
+    setHistoryRefreshTick(0)
+    recentRefreshPendingRef.current = false
+    window.sessionStorage.removeItem(STATION_STORAGE_KEY)
+    alertQueueRef.current = []
+    alertSeenRef.current = new Set()
+    if (alertTimerRef.current) {
+      window.clearTimeout(alertTimerRef.current)
+      alertTimerRef.current = null
+    }
+    setCrossStationAlert(null)
+    setTally(null)
+    setHandshakeError(message)
   }, [])
 
   const unlockStation = useCallback(async (serial) => {
@@ -147,6 +227,10 @@ export default function RecScannerPage() {
       if (!response.ok) {
         throw new Error(payload.error || HID_SCAN_CODES.DEVICE_UNREGISTERED)
       }
+      if (!payload.station?.token) {
+        throw new Error(HID_SCAN_CODES.DEVICE_UNREGISTERED)
+      }
+      stationTokenRef.current = payload.station.token
       setSerialNumber(serial)
       setAllocation({
         ...(payload.allocation || {}),
@@ -164,59 +248,211 @@ export default function RecScannerPage() {
     }
   }, [focusCapture])
 
-  const submitScan = useCallback(async (qrData) => {
-    if (!serialNumber || submittingRef.current) return
-    submittingRef.current = true
-    try {
-      const response = await fetch("/api/v1/rec/scanner/scans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ serialNumber, qrData }),
-      })
-      const payload = await response.json().catch(() => ({}))
-      const row = scanRowFromPayload(
-        payload,
-        payload.error || payload.code || "SCAN REJECTED"
-      )
-      setScanRows((previous) => [row, ...previous].slice(0, 200))
-
-      if (response.ok) {
-        const isDuplicate = payload.status === "duplicate"
-        playSuccessBeep()
-        setFeedback({
-          kind: isDuplicate ? "duplicate" : "ok",
-          message: isDuplicate ? "ALREADY SCANNED" : "SCANNED OK",
-          hopperDetected: Boolean(payload.hopperDetected),
-          scanType: payload.event?.name || payload.scanType || "",
-          registrantName: payload.registration?.name || "",
-          registrantOrg: payload.registration?.organization || "",
-          categoryTag: payload.registration?.participantCategoryTag || "",
-          categoryDirection: payload.registration?.participantCategoryDirection || "",
+  const processScanQueue = useCallback(async () => {
+    if (processingRef.current) return
+    processingRef.current = true
+    while (scanQueueRef.current.length) {
+      const { serial, token, qrData, generation } = scanQueueRef.current.shift()
+      const isCurrentStation = () => generation === stationGenerationRef.current
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 15000)
+      try {
+        const response = await fetch("/api/v1/rec/scanner/scans", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          cache: "no-store",
+          signal: controller.signal,
+          body: JSON.stringify({ serialNumber: serial, qrData }),
         })
-      } else {
+        const payload = await response.json().catch(() => ({}))
+
+        if (!isCurrentStation()) continue
+        if (response.status === 401) {
+          playRejectBuzz()
+          resetStationState("SESSION EXPIRED - SCAN THE STATION QR AGAIN")
+          continue
+        }
+
+        // Only confirmed database rows belong in station history. Some error
+        // responses have no persisted id; the feed will pick up any audit row.
+        if (payload?.scan?.$id) {
+          const row = scanRowFromPayload(payload)
+          setScanRows((previous) => [row, ...previous.filter((item) => item.id !== row.id)].slice(0, 50))
+        }
+
+        if (response.ok) {
+          const isDuplicate = payload.status === "duplicate"
+          if (isDuplicate) playDuplicateBeep()
+          else playSuccessBeep()
+          setFeedback({
+            kind: isDuplicate ? "duplicate" : "ok",
+            message: isDuplicate ? "ALREADY SCANNED" : "SCANNED OK",
+            hopperDetected: Boolean(payload.hopperDetected),
+            scanType: payload.event?.name || payload.scanType || "",
+            registrantName: payload.registration?.name || "",
+            registrantOrg: payload.registration?.organization || "",
+            categoryTag: payload.registration?.participantCategoryTag || "",
+            categoryDirection: payload.registration?.participantCategoryDirection || "",
+          })
+        } else {
+          playRejectBuzz()
+          setFeedback({
+            kind: "error",
+            message: payload.error || payload.code || "SCAN REJECTED",
+          })
+        }
+      } catch {
+        if (!isCurrentStation()) continue
         playRejectBuzz()
         setFeedback({
           kind: "error",
-          message: payload.error || payload.code || "SCAN REJECTED",
+          message: "SCAN STATUS UNKNOWN",
+          detail: "Rescan this badge to verify. The first scan may have been recorded.",
         })
+      } finally {
+        window.clearTimeout(timeout)
+        if (isCurrentStation()) {
+          setPendingScans((count) => Math.max(0, count - 1))
+          setHistoryRefreshTick((tick) => tick + 1)
+        }
       }
-    } catch {
-      playRejectBuzz()
-      const row = scanRowFromPayload({}, "SCAN REJECTED")
-      setScanRows((previous) => [row, ...previous].slice(0, 200))
-      setFeedback({ kind: "error", message: "SCAN REJECTED" })
-    } finally {
-      submittingRef.current = false
-      focusCapture()
     }
-  }, [focusCapture, serialNumber])
+    processingRef.current = false
+    if (scanQueueRef.current.length) processScanQueue()
+    else focusCapture()
+  }, [focusCapture, resetStationState])
 
-  const consumeSweep = useCallback((value) => {
+  const submitScan = useCallback((qrData) => {
+    if (!serialNumber || !stationTokenRef.current) return
+    scanQueueRef.current.push({
+      serial: serialNumber,
+      token: stationTokenRef.current,
+      qrData,
+      generation: stationGenerationRef.current,
+    })
+    setPendingScans((count) => count + 1)
+    processScanQueue()
+  }, [processScanQueue, serialNumber])
+
+  const advanceAlertQueue = useCallback(() => {
+    const next = alertQueueRef.current.shift()
+    setCrossStationAlert(next || null)
+    if (next) {
+      playCrossAlertChime()
+      alertTimerRef.current = window.setTimeout(advanceAlertQueue, 6000)
+    } else {
+      alertTimerRef.current = null
+    }
+  }, [])
+
+  const enqueueCrossStationAlerts = useCallback((alerts) => {
+    if (!alerts.length) return
+    alertQueueRef.current.push(...alerts)
+    if (!alertTimerRef.current) advanceAlertQueue()
+  }, [advanceAlertQueue])
+
+  const pollCrossStationAlerts = useCallback(async () => {
+    if (!serialNumber || !stationTokenRef.current) return
+    try {
+      const response = await fetch(
+        `/api/v1/rec/scanner/alerts?since=${encodeURIComponent(alertSinceRef.current)}`,
+        {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${stationTokenRef.current}` },
+        }
+      )
+      if (!response.ok) return
+      const payload = await response.json().catch(() => ({}))
+      if (payload.now) alertSinceRef.current = payload.now
+      const incoming = Array.isArray(payload.alerts) ? payload.alerts : []
+      const fresh = incoming.filter((alert) => alert.id && !alertSeenRef.current.has(alert.id))
+      fresh.forEach((alert) => alertSeenRef.current.add(alert.id))
+      // API returns newest first; show oldest-first so the sequence makes sense.
+      if (fresh.length) enqueueCrossStationAlerts([...fresh].reverse())
+    } catch {
+      // Best-effort. A missed poll just gets picked up next tick.
+    }
+  }, [enqueueCrossStationAlerts, serialNumber])
+
+  const fetchTally = useCallback(async () => {
+    if (!serialNumber || !stationTokenRef.current) return
+    try {
+      const response = await fetch("/api/v1/rec/scanner/tally", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${stationTokenRef.current}` },
+      })
+      if (!response.ok) return
+      const payload = await response.json().catch(() => ({}))
+      setTally(payload)
+    } catch {
+      // Best-effort; keep showing the last known tally until the next tick.
+    }
+  }, [serialNumber])
+
+  const fetchRecentScans = useCallback(async (afterPost = false) => {
+    const token = stationTokenRef.current
+    const generation = stationGenerationRef.current
+    if (!serialNumber || !token || document.visibilityState !== "visible") return
+    if (recentPollRef.current) {
+      if (afterPost) recentRefreshPendingRef.current = true
+      return
+    }
+    recentPollRef.current = true
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 10000)
+    try {
+      const response = await fetch("/api/v1/rec/scanner/scans/recent", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error("Could not refresh station history.")
+      const payload = await response.json()
+      if (generation !== stationGenerationRef.current) return
+      const persisted = Array.isArray(payload.scans) ? payload.scans : []
+      setScanRows((previous) => {
+        const localById = new Map(previous.map((row) => [row.id, row]))
+        const persistedIds = new Set(persisted.map((scan) => scan.id))
+        const merged = persisted.map((scan) => {
+          const stored = scanRowFromPersisted(scan)
+          const local = localById.get(scan.id)
+          return local ? { ...stored, ...local, scannedAt: stored.scannedAt, status: stored.status } : stored
+        })
+        return [...merged, ...previous.filter((row) => !persistedIds.has(row.id))]
+          .sort((a, b) => Date.parse(b.scannedAt) - Date.parse(a.scannedAt))
+          .slice(0, 50)
+      })
+      setFeedError("")
+    } catch {
+      if (generation === stationGenerationRef.current) setFeedError("Station history is unavailable. New scan results still appear above.")
+    } finally {
+      window.clearTimeout(timeout)
+      recentPollRef.current = false
+      if (recentRefreshPendingRef.current && generation === stationGenerationRef.current) {
+        recentRefreshPendingRef.current = false
+        fetchRecentScans()
+      }
+    }
+  }, [serialNumber])
+
+  const consumeSweep = useCallback((value, completion) => {
     const scanned = String(value || "").trim()
     if (!scanned) return
-
+    if (scanned.length < MIN_HID_SWEEP_LENGTH) {
+      setCaptureStatus(`Incomplete scanner input (${scanned.length} characters). Check the scanner mode and try again.`)
+      return
+    }
+    const receivedAt = new Date().toLocaleTimeString("en-UG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "Africa/Kampala",
+    })
     if (!serialNumber) {
+      setCaptureStatus(`Station input detected at ${receivedAt}; completed by ${completion}.`)
       if (isTeraHardwareSerial(scanned)) {
         unlockStation(scanned)
         return
@@ -227,8 +463,31 @@ export default function RecScannerPage() {
       return
     }
 
+    setCaptureStatus(`Badge input detected and sent at ${receivedAt}; completed by ${completion}.`)
     submitScan(scanned)
   }, [serialNumber, submitScan, unlockStation])
+
+  const finishSweep = useCallback((completion) => {
+    if (bufferTimerRef.current) window.clearTimeout(bufferTimerRef.current)
+    bufferTimerRef.current = null
+    const value = bufferRef.current
+    bufferRef.current = ""
+    sweepSourceRef.current = ""
+    lastSweepCompletedAtRef.current = Date.now()
+    consumeSweep(value, completion)
+  }, [consumeSweep])
+
+  const appendCapturedText = useCallback((value, source) => {
+    if (!value) return
+    // A keyboard wedge can also emit an input event. Keep one input source
+    // per sweep so each character is buffered only once.
+    if (sweepSourceRef.current && sweepSourceRef.current !== source) return
+    sweepSourceRef.current = source
+    if (!bufferRef.current) setCaptureStatus("Reading scanner input...")
+    bufferRef.current += value
+    if (bufferTimerRef.current) window.clearTimeout(bufferTimerRef.current)
+    bufferTimerRef.current = window.setTimeout(() => finishSweep("idle pause (no Enter or Tab)"), HID_SWEEP_IDLE_MS)
+  }, [finishSweep])
 
   useEffect(() => {
     const tick = () => setClock(formatClock())
@@ -266,40 +525,108 @@ export default function RecScannerPage() {
   }, [focusCapture, unlockStation])
 
   useEffect(() => {
+    if (!serialNumber) return undefined
+    alertSinceRef.current = new Date().toISOString()
+    alertSeenRef.current = new Set()
+    pollCrossStationAlerts()
+    const timer = window.setInterval(pollCrossStationAlerts, 6000)
+    return () => window.clearInterval(timer)
+  }, [pollCrossStationAlerts, serialNumber])
+
+  useEffect(() => {
+    if (!serialNumber) {
+      setTally(null)
+      return undefined
+    }
+    fetchTally()
+    const timer = window.setInterval(fetchTally, 20000)
+    return () => window.clearInterval(timer)
+  }, [fetchTally, serialNumber])
+
+  useEffect(() => {
+    if (!serialNumber) return undefined
+    fetchRecentScans()
+    const timer = window.setInterval(() => fetchRecentScans(), 15000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchRecentScans()
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [fetchRecentScans, serialNumber])
+
+  useEffect(() => {
+    if (historyRefreshTick > 0 && serialNumber) fetchRecentScans(true)
+  }, [fetchRecentScans, historyRefreshTick, serialNumber])
+
+  useEffect(() => {
+    const onWindowBlur = () => {
+      setCaptureStatus("Browser lost focus. Scans made while another window or browser control has focus cannot reach this station.")
+    }
+    const onWindowFocus = () => {
+      focusCapture()
+      setCaptureStatus((previous) => previous.startsWith("Browser lost focus.")
+        ? "Browser active again. Scan a badge to confirm input."
+        : previous)
+    }
+    window.addEventListener("blur", onWindowBlur)
+    window.addEventListener("focus", onWindowFocus)
+    return () => {
+      window.removeEventListener("blur", onWindowBlur)
+      window.removeEventListener("focus", onWindowFocus)
+    }
+  }, [focusCapture])
+
+  useEffect(() => {
     const onKeyDown = (event) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return
       if (event.key === "Shift") return
+      if (event.repeat) return
 
-      if (event.key === "Enter") {
+      if (event.key === "Enter" || event.key === "Tab") {
+        if (!bufferRef.current) {
+          // Some scanners send their configured suffix after the idle timer.
+          // Do not let that late Enter activate the focused Lock button.
+          if (Date.now() - lastSweepCompletedAtRef.current < HID_SWEEP_IDLE_MS) event.preventDefault()
+          return
+        }
         event.preventDefault()
-        const value = bufferRef.current
-        bufferRef.current = ""
-        lastKeyAtRef.current = 0
-        consumeSweep(value)
+        finishSweep(event.key)
         return
       }
 
       if (event.key.length !== 1) return
+      if (event.target?.closest?.("input:not(.rec-station-input), textarea, select, [contenteditable='true']")) return
+      // Let the focused scan field receive actual input events. Some HID
+      // scanners insert text without ordinary printable keydown events.
+      if (event.target === inputRef.current) return
+      if (event.key === " " && event.target?.closest?.("button, a")) return
       event.preventDefault()
-      const now = Date.now()
-      if (bufferRef.current && now - lastKeyAtRef.current > HID_KEYSTROKE_WINDOW_MS) {
-        bufferRef.current = ""
-      }
-      bufferRef.current += event.key
-      lastKeyAtRef.current = now
+      appendCapturedText(event.key, "keydown")
+    }
+
+    const onPaste = (event) => {
+      const value = event.clipboardData?.getData("text")
+      if (!value || event.target?.closest?.("input:not(.rec-station-input), textarea, [contenteditable='true']")) return
+      event.preventDefault()
+      bufferRef.current = value
+      sweepSourceRef.current = "paste"
+      finishSweep("paste")
     }
 
     window.addEventListener("keydown", onKeyDown, true)
-    return () => window.removeEventListener("keydown", onKeyDown, true)
-  }, [consumeSweep])
+    window.addEventListener("paste", onPaste, true)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true)
+      window.removeEventListener("paste", onPaste, true)
+      if (bufferTimerRef.current) window.clearTimeout(bufferTimerRef.current)
+    }
+  }, [appendCapturedText, finishSweep])
 
   const lockStation = () => {
-    setSerialNumber("")
-    setAllocation(null)
-    setFeedback(null)
-    setScanRows([])
-    setHandshakeError("")
-    window.sessionStorage.removeItem(STATION_STORAGE_KEY)
+    resetStationState("")
     focusCapture()
   }
 
@@ -320,18 +647,42 @@ export default function RecScannerPage() {
         ? "error"
         : "idle"
 
-  return (
-    <div id="rec-tera-station" className="rec-station" onClick={focusCapture}>
+  const scanCaptureInput = (
+    <div className="rec-station-capture-target">
+      <label htmlFor="rec-station-scan-input">Scanner input</label>
       <input
+        id="rec-station-scan-input"
         ref={inputRef}
-        aria-label="HID scanner capture"
+        aria-label="Scanner input"
         autoComplete="off"
         autoFocus
         className="rec-station-input"
         inputMode="none"
-        onBlur={focusCapture}
-        readOnly
+        placeholder={locked ? "Click here, then scan the station QR" : "Click here, then scan a badge QR"}
+        onInput={(event) => {
+          // Clear the field immediately so a badge token is never displayed.
+          const value = event.currentTarget.value
+          event.currentTarget.value = ""
+          appendCapturedText(value, "input")
+        }}
       />
+      <small>Keep this field focused while scanning.</small>
+    </div>
+  )
+
+  return (
+    <div id="rec-tera-station" className="rec-station" onClick={focusCapture}>
+      {crossStationAlert && (
+        <div className="rec-station-cross-alert" role="alert">
+          <div>
+            <strong>⚠ Badge re-scanned elsewhere</strong>
+            <p>
+              Already used at {formatAlertLocation(crossStationAlert)}
+              {crossStationAlert.scannedAt ? ` · ${formatScanTime(crossStationAlert.scannedAt)}` : ""}
+            </p>
+          </div>
+        </div>
+      )}
 
       {locked ? (
         <>
@@ -349,6 +700,8 @@ export default function RecScannerPage() {
               {clock && <span className="rec-station-clock">{clock}</span>}
             </div>
           </header>
+
+          {scanCaptureInput}
 
           <section className="rec-station-hero">
             <p className="rec-station-kicker">Station locked</p>
@@ -407,7 +760,7 @@ export default function RecScannerPage() {
               ? handshakeError
               : loadingStation
                 ? "Authorizing this Tera…"
-                : "Waiting for a serial QR. Keep this tab focused."}
+                : captureStatus || "Waiting for a serial QR. Keep this tab focused."}
           </div>
         </>
       ) : (
@@ -424,13 +777,21 @@ export default function RecScannerPage() {
             <div className="rec-station-meta">
               <span className="rec-station-chip rec-station-chip-live">Unlocked</span>
               {clock && <span className="rec-station-clock">{clock}</span>}
-              <button className="rec-station-lock-btn" onClick={lockStation} type="button">
+              <button className="rec-station-lock-btn" onClick={lockStation} type="button" disabled={pendingScans > 0}>
                 Lock station
               </button>
             </div>
           </header>
 
-          <div className={`rec-station-result rec-station-result-${resultKind}`}>
+          {scanCaptureInput}
+
+          {pendingScans > 0 && (
+            <div className="rec-station-pending" role="status">
+              Processing badge{pendingScans > 1 ? ` · ${pendingScans - 1} waiting` : "..."}
+            </div>
+          )}
+
+          <div className={`rec-station-result rec-station-result-${resultKind}`} aria-live="polite">
             {feedback ? (
               <>
                 <strong>{feedback.message}</strong>
@@ -444,6 +805,7 @@ export default function RecScannerPage() {
                     feedback.scanType,
                     feedback.categoryDirection ? `Direct to ${feedback.categoryDirection}` : "",
                     feedback.hopperDetected ? "Hall change flagged" : "",
+                    feedback.detail,
                   ].filter(Boolean).join(" · ")}
                 </p>
               </>
@@ -455,16 +817,43 @@ export default function RecScannerPage() {
             )}
           </div>
 
+          <div className="rec-station-capture-status" role="status">
+            {captureStatus || "No scanner input detected yet. Keep this browser tab active."}
+          </div>
+
+          {tally?.summary && (
+            <div className="rec-station-tally" aria-label="Conference-wide sign-in tally">
+              <div>
+                <strong>{tally.summary.uniqueAttendees?.toLocaleString() ?? "—"}</strong>
+                <span>Signed in</span>
+              </div>
+              <div>
+                <strong>{tally.summary.registeredAttendees?.toLocaleString() ?? "—"}</strong>
+                <span>Registered</span>
+              </div>
+              <div>
+                <strong>{tally.summary.notYetScanned?.toLocaleString() ?? "—"}</strong>
+                <span>Not yet in</span>
+              </div>
+              <div>
+                <strong>{tally.summary.attendanceRate ?? 0}%</strong>
+                <span>Attendance</span>
+              </div>
+            </div>
+          )}
+
           <main className="rec-station-body">
             <div className="rec-station-body-top">
               <div>
-                <h2>This session</h2>
-                <p>Each accepted or rejected scan is added below in Kampala time.</p>
+                <h2>Recent station records</h2>
+                <p>Latest 50 persisted scans for this Tera in Kampala time. Registrant details appear for scans handled in this tab. The tally above covers all stations.</p>
               </div>
               <span className="rec-station-chip">
-                {acceptedCount} accepted · {scanRows.length} recorded
+                {acceptedCount} accepted · {scanRows.length} shown
               </span>
             </div>
+
+            {feedError && <p className="rec-station-feed-error" role="status">{feedError}</p>}
 
             <div className="rec-station-table-wrap">
               <table className="rec-station-table">
@@ -482,7 +871,7 @@ export default function RecScannerPage() {
                   {scanRows.length === 0 ? (
                     <tr>
                       <td className="rec-station-empty" colSpan={6}>
-                        No scans yet. Point the unlocked Tera at a badge QR.
+                        No persisted scans for this station yet. Point the unlocked Tera at a badge QR.
                       </td>
                     </tr>
                   ) : scanRows.map((row) => (

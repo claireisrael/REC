@@ -24,6 +24,7 @@ import {
   getTeraStationEventTypes,
   hidScanTypeToEventType,
   eventMatchesOperatorRestrictions,
+  venueMatchesAllowedList,
   isTeraScannerOperator,
   selectTeraScanEvent,
   teraOperatorEmail,
@@ -80,6 +81,13 @@ test("scan events are closed after their end time", () => {
 
   assert.equal(status.ok, false)
   assert.equal(status.code, "event_ended")
+})
+
+test("date-only scan events open only on their Kampala date", () => {
+  const event = { date: "2026-10-19", startTime: "", endTime: "" }
+  assert.equal(getRecScanEventWindowStatus(event, "2026-09-20T14:19:00Z").code, "event_not_started")
+  assert.equal(getRecScanEventWindowStatus(event, "2026-10-18T21:00:00Z").code, "event_open")
+  assert.equal(getRecScanEventWindowStatus(event, "2026-10-19T21:00:00Z").code, "event_ended")
 })
 
 test("scan event setup rejects an end time before the start time", () => {
@@ -370,6 +378,28 @@ test("Tera barcode scanners are registered as operators with a stable device ema
   )
 })
 
+test("venue matching for scanner operators is case-insensitive and tolerates substrings", () => {
+  // The exact mismatch that silently blocked every scan for a live event:
+  // an operator allow-listed for "Main Entrance" against an event whose
+  // venue was typed as "main entrance".
+  assert.equal(venueMatchesAllowedList("main entrance", ["Main Entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Main Entrance", ["main entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Main Entrance - Gate B", ["Main Entrance"]), true)
+  assert.equal(venueMatchesAllowedList("Katonga Hall", ["Main Entrance"]), false)
+  // No allow-list configured means no venue restriction at all.
+  assert.equal(venueMatchesAllowedList("Anywhere", []), true)
+  // An event with no venue set can't be excluded by a venue restriction.
+  assert.equal(venueMatchesAllowedList("", ["Main Entrance"]), true)
+
+  assert.equal(
+    eventMatchesOperatorRestrictions(
+      { $id: "strategy-1", type: "custom", venue: "main entrance" },
+      { allowedEventIds: ["strategy-1"], allowedEventTypes: ["custom"], allowedVenues: ["Main Entrance"] }
+    ),
+    true
+  )
+})
+
 test("Tera scanners start with no access clock until editors set one", () => {
   const conference = {
     startDate: "2026-09-08",
@@ -449,6 +479,23 @@ test("Tera stations pick the open matching scan event by type and venue", () => 
 
   assert.equal(morning.$id, "session")
   assert.equal(lunch.$id, "lunch")
+})
+
+test("Tera stations do not route scans to a closed event", () => {
+  const events = [{
+    $id: "future-lunch",
+    type: "lunch",
+    date: "2026-10-19",
+    isActive: true,
+    startTime: "",
+    endTime: "",
+    venue: "",
+  }]
+  assert.equal(selectTeraScanEvent(events, {
+    assignedRole: "Main Gate",
+    deployedLocation: "Main Entrance",
+    now: "2026-09-20T14:19:00Z",
+  }), null)
 })
 
 test("HID QR payloads extract a participant id from raw, JSON, and URL values", () => {

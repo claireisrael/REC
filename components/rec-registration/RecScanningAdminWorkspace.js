@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import {
   faArrowLeft,
@@ -15,6 +15,7 @@ import {
   faPaperPlane,
   faPenToSquare,
   faPlus,
+  faPrint,
   faQrcode,
   faRefresh,
   faSave,
@@ -277,8 +278,8 @@ function operatorAccessSummary(operator) {
       {operator.accessStartsAt ? `Starts ${formatDate(operator.accessStartsAt)}` : "Starts immediately"}
       {operator.accessEndsAt ? ` · Ends ${formatDate(operator.accessEndsAt)}` : " · No expiry"}
       {operator.lastLoginAt
-        ? ` · ${operator.deviceKind === "tera_hid" ? "Last used" : "Last login"} ${formatDate(operator.lastLoginAt)}`
-        : (operator.deviceKind === "tera_hid" ? " · Not used yet" : " · Never signed in")}
+        ? ` · ${operator.deviceKind === "tera_hid" ? "Last unlocked" : "Last login"} ${formatDate(operator.lastLoginAt)}`
+        : (operator.deviceKind === "tera_hid" ? " · Never unlocked" : " · Never signed in")}
     </>
   )
 }
@@ -384,10 +385,13 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   })
   const [badgePage, setBadgePage] = useState(1)
   const [badgeLimit, setBadgeLimit] = useState(25)
-  const [badgeStatus, setBadgeStatus] = useState("without_badge")
+  const [badgeStatus, setBadgeStatus] = useState("all")
   const [badgeSearchInput, setBadgeSearchInput] = useState("")
   const [badgeSearch, setBadgeSearch] = useState("")
   const [selectedBadgeRegistrations, setSelectedBadgeRegistrations] = useState([])
+  const [badgeAction, setBadgeAction] = useState(null)
+  const [issuingBadgeId, setIssuingBadgeId] = useState("")
+  const [issuingBadgeMode, setIssuingBadgeMode] = useState("")
   const [selectedEventIds, setSelectedEventIds] = useState([])
   const [eventForm, setEventForm] = useState(emptyEventForm)
   const [editingEventId, setEditingEventId] = useState("")
@@ -404,11 +408,16 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [confirmDialog, setConfirmDialog] = useState(null)
+  const workspaceRequestId = useRef(0)
 
   const selectedConference = useMemo(
     () => conferences.find((conference) => conference.$id === conferenceId) || null,
     [conferences, conferenceId]
   )
+  const registrationYear = Number(selectedConference?.year)
+  const newRegistrationHref = Number.isSafeInteger(registrationYear) && registrationYear > 0
+    ? `/dashboard/rec-conference/admin/registrations/new?year=${registrationYear}`
+    : "/dashboard/rec-conference/admin/registrations/new"
 
   const dayOptions = selectedConference?.days || []
   const venueOptions = useMemo(
@@ -457,6 +466,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
 
   const loadWorkspace = useCallback(async () => {
     if (!conferenceId) return
+    const requestId = ++workspaceRequestId.current
     setError("")
     const badgeParams = new URLSearchParams({
       conferenceId,
@@ -476,17 +486,24 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       limit: String(operatorLimit),
     })
     const shouldLoadEvents = activeView === "events" || activeView === "operators"
-    const [eventData, operatorData, badgeData] = await Promise.all([
-      shouldLoadEvents
-        ? fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
-        : Promise.resolve({ documents: [], total: 0, page: 1, limit: eventLimit, totalPages: 1 }),
-      activeView === "operators"
-        ? fetchJson(`/api/rec/scanning/operators?${operatorParams.toString()}`)
-        : Promise.resolve({ documents: [], total: 0, page: 1, limit: operatorLimit, totalPages: 1 }),
-      activeView === "badges"
-        ? fetchJson(`/api/rec/scanning/badges?${badgeParams.toString()}`)
-        : Promise.resolve(null),
-    ])
+    let eventData, operatorData, badgeData
+    try {
+      [eventData, operatorData, badgeData] = await Promise.all([
+        shouldLoadEvents
+          ? fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+          : Promise.resolve({ documents: [], total: 0, page: 1, limit: eventLimit, totalPages: 1 }),
+        activeView === "operators"
+          ? fetchJson(`/api/rec/scanning/operators?${operatorParams.toString()}`)
+          : Promise.resolve({ documents: [], total: 0, page: 1, limit: operatorLimit, totalPages: 1 }),
+        activeView === "badges"
+          ? fetchJson(`/api/rec/scanning/badges?${badgeParams.toString()}`)
+          : Promise.resolve(null),
+      ])
+    } catch (error) {
+      if (requestId === workspaceRequestId.current) throw error
+      return
+    }
+    if (requestId !== workspaceRequestId.current) return
     setEvents(eventData.documents || [])
     setEventPager({
       total: eventData.total || 0,
@@ -946,9 +963,13 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setSelectedBadgeRegistrations(allSelected ? [] : visibleIds)
   }
 
-  const issueBadges = async (registrationIds, { sendEmail = true } = {}) => {
-    if (!conferenceId || !registrationIds.length) return
+  const issueBadges = async (registrationIds, { sendEmail = true, reissue = false } = {}) => {
+    if (!conferenceId || !registrationIds.length) return false
+    const singleRegistrationId = registrationIds.length === 1 ? registrationIds[0] : ""
     setSaving("badges")
+    setIssuingBadgeId(singleRegistrationId)
+    setIssuingBadgeMode(sendEmail ? "email" : "print")
+    setBadgeAction(null)
     setError("")
     setSuccess("")
     try {
@@ -957,16 +978,58 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conferenceId, registrationIds, sendEmail }),
       })
-      const sentText = sendEmail ? " and emailed" : ""
-      const failedText = data.failed ? ` ${data.failed} failed.` : ""
-      const emailFailedText = data.emailFailed ? ` ${data.emailFailed} email${data.emailFailed === 1 ? "" : "s"} failed to send.` : ""
-      setSuccess(`${data.issued || 0} badge${data.issued === 1 ? "" : "s"} generated${sentText}.${failedText}${emailFailedText}`)
+      const issued = data.issued || 0
+      const failed = data.failed || 0
+      const emailFailed = data.emailFailed || 0
+      const emailsSent = Math.max(0, issued - emailFailed)
+      const failedResults = (data.results || []).filter((result) => !result.ok)
+      const errorDetails = failedResults.map((result) => result.error).filter(Boolean)
+      const newBadgePath = !sendEmail && singleRegistrationId
+        ? getRecBadgeViewPath((data.results || []).find((result) => result.registrationId === singleRegistrationId && result.ok)?.badge?.badgeUrl)
+        : ""
+      let resultError = ""
+      if (sendEmail ? emailsSent > 0 : issued > 0) {
+        setSuccess(sendEmail
+          ? `${emailsSent} badge email${emailsSent === 1 ? "" : "s"} sent.`
+          : `${issued} badge${issued === 1 ? "" : "s"} generated. Use Open, then Print badge.`)
+      }
+      if (failed || emailFailed) {
+        const emailErrors = (data.results || [])
+          .filter((result) => result.ok && result.badge?.lastEmailStatus === "failed")
+          .map((result) => result.badge?.emailError)
+          .filter(Boolean)
+        resultError = [
+          failed ? `${failed} badge${failed === 1 ? "" : "s"} failed` : "",
+          emailFailed ? `${emailFailed} email${emailFailed === 1 ? "" : "s"} failed` : "",
+          ...errorDetails,
+          ...emailErrors,
+        ].filter(Boolean).join(". ")
+        if (singleRegistrationId) setBadgeAction({ registrationId: singleRegistrationId, message: resultError, isError: true })
+      } else if (singleRegistrationId) {
+        setBadgeAction({
+          registrationId: singleRegistrationId,
+          message: sendEmail ? (reissue ? "Badge email resent." : "Badge generated and emailed.") : "Badge generated. Select Open, then Print badge.",
+          isError: false,
+          badgeViewPath: newBadgePath,
+        })
+      }
       setSelectedBadgeRegistrations([])
-      await loadWorkspace()
+      let refreshErrorMessage = ""
+      try {
+        await loadWorkspace()
+      } catch (refreshError) {
+        refreshErrorMessage = refreshError.message || "Badge saved, but the registry could not be refreshed."
+      }
+      if (resultError || refreshErrorMessage) setError([resultError, refreshErrorMessage].filter(Boolean).join(". "))
+      return failed === 0 && emailFailed === 0
     } catch (err) {
       setError(err.message || "Failed to generate badges.")
+      if (singleRegistrationId) setBadgeAction({ registrationId: singleRegistrationId, message: err.message || "Failed to generate badge.", isError: true })
+      return false
     } finally {
       setSaving("")
+      setIssuingBadgeId("")
+      setIssuingBadgeMode("")
     }
   }
 
@@ -1439,10 +1502,14 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     Badge Registry
                   </h3>
                   <p className="rec-muted mb-0 mt-1">
-                    Generate digital QR badges for registrants, email secure badge links, and revoke active badges when needed.
+                    Generate digital QR badges for registrants, email secure badge links, and revoke active badges when needed. Generate for print creates an active badge without emailing it; then use Open → Print badge.
                   </p>
                 </div>
                 <div className="rec-page-actions">
+                  <Link href={newRegistrationHref} className="rec-btn rec-btn-primary">
+                    <FontAwesomeIcon icon={faPlus} />
+                    New Registration
+                  </Link>
                   <button
                     type="button"
                     className="rec-btn rec-btn-outline"
@@ -1543,11 +1610,38 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   </form>
                 </div>
 
+                {badgeAction && (badgeAction.badgeViewPath || !(badgeRegistry.documents || []).some((row) => row.registration?.$id === badgeAction.registrationId)) && (
+                  <div className={`rec-alert ${badgeAction.isError ? "rec-alert-danger" : "rec-alert-success"} mt-3`} role={badgeAction.isError ? "alert" : "status"}>
+                    {badgeAction.message}
+                    {badgeAction.badgeViewPath ? (
+                      <a href={badgeAction.badgeViewPath} target="_blank" rel="noopener noreferrer" className="rec-btn rec-btn-outline rec-btn-sm ms-2">
+                        <FontAwesomeIcon icon={faLink} />
+                        Open new badge
+                      </a>
+                    ) : !badgeAction.isError ? " If this registrant moved out of the current filter, choose All Registrants or With QR Badge to find Open." : null}
+                  </div>
+                )}
+
                 {(badgeRegistry.documents || []).length === 0 ? (
                   <div className="rec-empty-state">
                     <FontAwesomeIcon icon={faQrcode} size="2x" />
-                    <h4 className="rec-empty-title">No badge records found</h4>
-                    <p>Change the badge status filter or search term.</p>
+                    {badgeStatus === "without_badge" && (badgeRegistry.counts?.withoutBadge || 0) === 0 ? (
+                      <>
+                        <h4 className="rec-empty-title">{badgeRegistry.counts?.total ? "All registrants have QR badges" : "No registrants yet"}</h4>
+                        <p>{badgeRegistry.counts?.total
+                          ? "Everyone registered for this conference already has an active QR badge. Register a participant to create another badge."
+                          : "Register a participant first, then generate a QR badge for them."}</p>
+                        <Link href={newRegistrationHref} className="rec-btn rec-btn-primary">
+                          <FontAwesomeIcon icon={faPlus} />
+                          Register participant
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <h4 className="rec-empty-title">No badge records found</h4>
+                        <p>Change the badge status filter or search term.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="rec-table-wrap rec-responsive-table mt-3">
@@ -1636,28 +1730,51 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                                 )}
                               </td>
                               <td data-label="Actions">
-                                <div className="rec-row-actions">
+                                <div className="rec-row-actions" style={{ flexWrap: "wrap" }}>
+                                  {!badge?.isActive && (
+                                    <button
+                                      type="button"
+                                      className="rec-btn rec-btn-outline rec-btn-sm"
+                                      onClick={() => issueBadges([registration.$id], { sendEmail: false })}
+                                      disabled={saving === "badges"}
+                                    >
+                                      <FontAwesomeIcon icon={issuingBadgeId === registration.$id && issuingBadgeMode === "print" ? faSpinner : faPrint} spin={issuingBadgeId === registration.$id && issuingBadgeMode === "print"} />
+                                      Generate for print
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className="rec-btn rec-btn-outline rec-btn-sm"
-                                    onClick={() => issueBadges([registration.$id], { sendEmail: true })}
+                                    onClick={() => issueBadges([registration.$id], { sendEmail: true, reissue: badge?.isActive === true })}
                                     disabled={saving === "badges"}
                                   >
-                                    <FontAwesomeIcon icon={faEnvelope} />
-                                    {badge?.isActive ? "Reissue" : "Generate"}
+                                    <FontAwesomeIcon icon={issuingBadgeId === registration.$id && issuingBadgeMode === "email" ? faSpinner : faEnvelope} spin={issuingBadgeId === registration.$id && issuingBadgeMode === "email"} />
+                                    {badge?.isActive ? "Reissue" : "Generate & email"}
                                   </button>
                                   {badge?.isActive && (
                                     <button
                                       type="button"
                                       className="rec-btn rec-btn-accent rec-btn-sm"
                                       onClick={() => revokeBadge(row)}
-                                      disabled={saving === badge.$id}
+                                      disabled={saving === "badges" || saving === badge.$id}
                                     >
                                       {saving === badge.$id ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faBan} />}
                                       Revoke
                                     </button>
                                   )}
                                 </div>
+                                {badgeAction?.registrationId === registration.$id && (
+                                  <div
+                                    className="rec-row-desc mt-1"
+                                    role={badgeAction.isError ? "alert" : "status"}
+                                    style={{ color: badgeAction.isError ? "#b42318" : "#167347" }}
+                                  >
+                                    {badgeAction.message}
+                                    {badgeAction.badgeViewPath && (
+                                      <a href={badgeAction.badgeViewPath} target="_blank" rel="noopener noreferrer" className="rec-inline-link ms-2">Open new badge</a>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           )

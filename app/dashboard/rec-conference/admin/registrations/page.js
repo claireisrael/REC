@@ -34,7 +34,8 @@ function AccessMessage({ icon, title, children }) {
 
 export default function RecRegistrationsPage() {
   const searchParams = useSearchParams()
-  const mailFailed = searchParams.get("mail") === "failed"
+  const mailStatus = searchParams.get("mail")
+  const mailFailed = mailStatus === "failed" || mailStatus === "unconfigured"
   const {
     isSeniorManager,
     hasModuleAccess,
@@ -97,7 +98,10 @@ export default function RecRegistrationsPage() {
             <div>
               <strong>Registration saved.</strong>
               <p className="mb-0">
-                The confirmation email could not be sent. You can open the registration later and send it again.
+                {mailStatus === "unconfigured"
+                  ? "The confirmation email was not sent because NEXT_PUBLIC_API_BASE_URL is not configured. Set it to the email API URL and restart the app before retrying email."
+                  : "The confirmation email could not be sent. You can open the registration later and send it again."}
+                {" "}The registrant is ready in the <Link href="/dashboard/rec-conference/admin/scanning/badges">Badge Registry</Link>, where you can generate a badge for print without email.
               </p>
             </div>
           </div>

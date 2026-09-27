@@ -77,7 +77,7 @@ export default function NewRecRegistrationPage() {
     try {
       const saved = await registerForConferenceYear(payload.email, payload, selectedYear, appwriteServices)
 
-      let mailFailed = false
+      let mailStatus = ""
       if (options.sendConfirmation) {
         try {
           await sendConfirmationEmail(
@@ -86,12 +86,11 @@ export default function NewRecRegistrationPage() {
             conference.sponsorshipPackageUrl
           )
         } catch (emailErr) {
-          console.error("Confirmation email failed after registration save:", emailErr)
-          mailFailed = true
+          mailStatus = emailErr?.code === "email_api_missing" ? "unconfigured" : "failed"
         }
       }
 
-      const mailQuery = mailFailed ? "&mail=failed" : ""
+      const mailQuery = mailStatus ? `&mail=${mailStatus}` : ""
       router.push(`/dashboard/rec-conference/admin/registrations?year=${selectedYear}${mailQuery}`)
     } catch (err) {
       console.error("Error creating registration:", err)
