@@ -83,6 +83,13 @@ test("scan events are closed after their end time", () => {
   assert.equal(status.code, "event_ended")
 })
 
+test("date-only scan events open only on their Kampala date", () => {
+  const event = { date: "2026-10-19", startTime: "", endTime: "" }
+  assert.equal(getRecScanEventWindowStatus(event, "2026-09-20T14:19:00Z").code, "event_not_started")
+  assert.equal(getRecScanEventWindowStatus(event, "2026-10-18T21:00:00Z").code, "event_open")
+  assert.equal(getRecScanEventWindowStatus(event, "2026-10-19T21:00:00Z").code, "event_ended")
+})
+
 test("scan event setup rejects an end time before the start time", () => {
   const error = getRecScanEventWindowError({
     startTime: "2026-10-19T10:00:00+03:00",
@@ -472,6 +479,23 @@ test("Tera stations pick the open matching scan event by type and venue", () => 
 
   assert.equal(morning.$id, "session")
   assert.equal(lunch.$id, "lunch")
+})
+
+test("Tera stations do not route scans to a closed event", () => {
+  const events = [{
+    $id: "future-lunch",
+    type: "lunch",
+    date: "2026-10-19",
+    isActive: true,
+    startTime: "",
+    endTime: "",
+    venue: "",
+  }]
+  assert.equal(selectTeraScanEvent(events, {
+    assignedRole: "Main Gate",
+    deployedLocation: "Main Entrance",
+    now: "2026-09-20T14:19:00Z",
+  }), null)
 })
 
 test("HID QR payloads extract a participant id from raw, JSON, and URL values", () => {

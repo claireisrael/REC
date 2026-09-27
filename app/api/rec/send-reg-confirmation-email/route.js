@@ -23,10 +23,15 @@ export async function POST(request) {
 
     return NextResponse.json({ sent: true }, { status: 202 })
   } catch (error) {
-    console.error("Failed to send confirmation email", error)
+    if (error.code !== "email_api_missing") {
+      console.error("Failed to send confirmation email", error)
+    }
     return NextResponse.json(
-      { error: error.message || "Failed to send confirmation email" },
-      { status: 502 }
+      {
+        error: error.message || "Failed to send confirmation email",
+        code: error.code || "email_send_failed",
+      },
+      { status: error.code === "email_api_missing" ? 503 : 502 }
     )
   }
 }

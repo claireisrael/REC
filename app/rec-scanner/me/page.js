@@ -75,30 +75,55 @@ export default function RecScannerMePage() {
   const alertSeenRef = useRef(new Set())
   const alertSinceRef = useRef(new Date().toISOString())
   const alertTimerRef = useRef(null)
+  const loadingRef = useRef(false)
 
   const load = useCallback(async () => {
-    if (!getScannerToken()) {
+    const token = getScannerToken()
+    if (!token) {
       router.replace("/rec-scanner/login")
       return
     }
+    if (loadingRef.current) return
+    loadingRef.current = true
     setLoading(true)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 15000)
     try {
-      const [meResponse, statsResponse] = await Promise.all([
-        scannerFetch("/api/v1/rec/scanner/auth/me"),
-        scannerFetch("/api/v1/rec/scanner/me/stats"),
+      const [meResult, statsResult] = await Promise.allSettled([
+        scannerFetch("/api/v1/rec/scanner/auth/me", { signal: controller.signal }),
+        scannerFetch("/api/v1/rec/scanner/me/stats", { signal: controller.signal }),
       ])
-      const mePayload = await meResponse.json().catch(() => ({}))
-      const statsPayload = await statsResponse.json().catch(() => ({}))
-      if (!meResponse.ok) throw new Error(mePayload.error || "Your session has expired.")
-      if (!statsResponse.ok) throw new Error(statsPayload.error || "Could not load your stats.")
+      if (getScannerToken() !== token) return
+      const meResponse = meResult.status === "fulfilled" ? meResult.value : null
+      const statsResponse = statsResult.status === "fulfilled" ? statsResult.value : null
+      if ([meResponse, statsResponse].some((response) => response?.status === 401 || response?.status === 403)) {
+        clearScannerToken()
+        setProfile(null)
+        setStats(null)
+        setError("Your scanner session has expired. Please sign in again.")
+        router.replace("/rec-scanner/login")
+        return
+      }
+      if (!meResponse?.ok || !statsResponse?.ok) {
+        const failedResponse = !meResponse?.ok ? meResponse : statsResponse
+        const payload = await failedResponse?.json().catch(() => ({}))
+        throw new Error(payload?.error || "Could not refresh scanner information. Please retry.")
+      }
+      const [mePayload, statsPayload] = await Promise.all([
+        meResponse.json(),
+        statsResponse.json(),
+      ])
+      if (getScannerToken() !== token) return
       setProfile(mePayload)
       setStats(statsPayload)
       setError("")
     } catch (err) {
-      clearScannerToken()
-      setError(err.message || "Your session has expired.")
-      window.setTimeout(() => router.replace("/rec-scanner/login"), 1800)
+      if (getScannerToken() === token) {
+        setError(err.message || "Could not refresh scanner information. Please retry.")
+      }
     } finally {
+      window.clearTimeout(timeout)
+      loadingRef.current = false
       setLoading(false)
     }
   }, [router])
@@ -178,7 +203,12 @@ export default function RecScannerMePage() {
   if (error && !profile) {
     return (
       <div className="rec-scanner-auth">
-        <p className="rec-scanner-auth-status">{error}</p>
+        <div className="rec-scanner-auth-status" role="alert">
+          <p>{error}</p>
+          <button type="button" className="rec-scanner-auth-link" onClick={load} disabled={loading}>
+            {loading ? "Retrying..." : "Retry"}
+          </button>
+        </div>
       </div>
     )
   }
@@ -204,6 +234,11 @@ export default function RecScannerMePage() {
       )}
 
       <div className="rec-scanner-auth-card rec-scanner-auth-card-wide">
+        {error && (
+          <div className="rec-scanner-auth-error" role="status">
+            {error} Last successful information is shown. <button type="button" className="rec-scanner-auth-link" onClick={load} disabled={loading}>{loading ? "Retrying..." : "Retry"}</button>
+          </div>
+        )}
         <p className="rec-scanner-auth-kicker">
           {profile?.conference?.title || profile?.conference?.shortName || "REC Scanner"}
         </p>
@@ -268,6 +303,52 @@ export default function RecScannerMePage() {
                   <tr>
                     <td colSpan={5} className="rec-scanner-me-scans-empty">
                       No scans recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="rec-scanner-me-scans">
+          <div className="rec-scanner-me-scans-head">
+            <h2>Recent conference scans</h2>
+            <span>{stats?.recentConferenceScans?.length || 0} latest</span>
+          </div>
+          <div className="rec-scanner-me-scans-table-wrap">
+            <table className="rec-scanner-me-scans-table rec-scanner-me-conference-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Registrant</th>
+                  <th>Event</th>
+                  <th>Scanner</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats?.recentConferenceScans?.length ? (
+                  stats.recentConferenceScans.map((scan) => (
+                    <tr key={scan.scanId}>
+                      <td>{formatScanTime(scan.scannedAt)}</td>
+                      <td>{scan.registrantName || "—"}</td>
+                      <td>{scan.eventName || "—"}</td>
+                      <td>
+                        {scan.scannerName || "Unknown scanner"}
+                        {scan.deviceLabel && scan.deviceLabel !== scan.scannerName && <small>{scan.deviceLabel}</small>}
+                      </td>
+                      <td>
+                        <span className={`rec-scanner-me-scan-pill rec-scanner-me-scan-pill-${scan.status}`}>
+                          {scanStatusLabel(scan.status)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="rec-scanner-me-scans-empty">
+                      No scans recorded for this conference yet.
                     </td>
                   </tr>
                 )}

@@ -283,6 +283,10 @@
   font-size: 0.82rem;
 }
 
+.rec-scanner-me-conference-table {
+  min-width: 680px;
+}
+
 .rec-scanner-me-scans-table th,
 .rec-scanner-me-scans-table td {
   padding: 9px 10px;

@@ -73,6 +73,7 @@ export async function POST(request) {
       const result = await processHidScannerCapture({
         serialNumber: stationContext.serialNumber,
         qrData: data.qrData || data.qrPayload,
+        allocation: stationContext.allocation,
       })
       const status = result.status === "duplicate" ? 200 : 201
       return NextResponse.json(result, { status })

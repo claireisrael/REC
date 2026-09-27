@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  attributeRecScannerOperatorScans,
   buildRecScanAlerts,
   buildRecScanAnalytics,
   buildRecScanLogRows,
@@ -212,6 +213,28 @@ test("scanner leaderboard ranks by accepted scans and a scanner can find their o
   assert.equal(unknown.mine, null)
   assert.equal(unknown.rank, null)
   assert.equal(unknown.totalScanners, 3)
+})
+
+test("email operator stats include Tera scans attributed to the same operator document", () => {
+  const sharedOperatorScans = [
+    { scannedBy: "scanner:shared-operator", scannerName: "Gate Team", status: "accepted", registrationId: "reg-1" },
+    { scannedBy: "shared-operator", scannerName: "Tera Hall A", deviceId: "01050742", status: "accepted", registrationId: "reg-2" },
+    { scannedBy: "other-operator", scannerName: "Tera Hall B", deviceId: "01050743", status: "accepted", registrationId: "reg-3" },
+  ]
+  const attributed = attributeRecScannerOperatorScans(sharedOperatorScans, {
+    operatorId: "shared-operator",
+    scannerKey: "scanner:shared-operator",
+    scannerName: "Gate Team",
+  })
+  const leaderboard = buildRecScannerLeaderboard(attributed)
+  const { mine, rank } = getRecScannerRankInfo(leaderboard, "scanner:shared-operator")
+
+  assert.equal(mine.accepted, 2)
+  assert.equal(mine.uniqueRegistrants, 2)
+  assert.equal(rank, 1)
+  assert.equal(attributed.filter((scan) => scan.scannedBy === "scanner:shared-operator").length, 2)
+  assert.equal(leaderboard.find((scanner) => scanner.key === "other-operator").accepted, 1)
+  assert.equal(sharedOperatorScans[1].scannedBy, "shared-operator")
 })
 
 test("scan alerts never expose attendee-identifying fields", () => {

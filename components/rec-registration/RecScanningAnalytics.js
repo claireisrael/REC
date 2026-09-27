@@ -271,6 +271,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
   const [appliedFilters, setAppliedFilters] = useState({ eventId: "", from: "", to: "" })
   const [overview, setOverview] = useState(emptyOverview)
   const [overviewLoading, setOverviewLoading] = useState(true)
+  const [overviewRefreshing, setOverviewRefreshing] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState("")
   const [dataLoading, setDataLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState("")
@@ -373,17 +375,24 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
     const controller = new AbortController()
 
     const loadOverview = async () => {
-      setOverviewLoading(true)
+      if (lastUpdatedAt) setOverviewRefreshing(true)
+      else setOverviewLoading(true)
       setError("")
       try {
         const data = await fetchJson(`/api/rec/scanning/analytics?${reportParams.toString()}`, {
           signal: controller.signal,
         })
-        setOverview(data)
+        if (!controller.signal.aborted) {
+          setOverview(data)
+          setLastUpdatedAt(new Date().toISOString())
+        }
       } catch (err) {
-        if (err.name !== "AbortError") setError(err.message || "Failed to load scan analytics.")
+        if (!controller.signal.aborted && err.name !== "AbortError") setError(err.message || "Failed to load scan analytics.")
       } finally {
-        if (!controller.signal.aborted) setOverviewLoading(false)
+        if (!controller.signal.aborted) {
+          setOverviewLoading(false)
+          setOverviewRefreshing(false)
+        }
       }
     }
 
@@ -409,9 +418,9 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
         const data = await fetchJson(`/api/rec/scanning/analytics/registrants?${params.toString()}`, {
           signal: controller.signal,
         })
-        setAttendeePage(data)
+        if (!controller.signal.aborted) setAttendeePage(data)
       } catch (err) {
-        if (err.name !== "AbortError") setError(err.message || "Failed to load attendee analytics.")
+        if (!controller.signal.aborted && err.name !== "AbortError") setError(err.message || "Failed to load attendee analytics.")
       } finally {
         if (!controller.signal.aborted) setDataLoading(false)
       }
@@ -438,9 +447,9 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
         const data = await fetchJson(`/api/rec/scanning/analytics/scans?${params.toString()}`, {
           signal: controller.signal,
         })
-        setScanPage(data)
+        if (!controller.signal.aborted) setScanPage(data)
       } catch (err) {
-        if (err.name !== "AbortError") setError(err.message || "Failed to load the scan log.")
+        if (!controller.signal.aborted && err.name !== "AbortError") setError(err.message || "Failed to load the scan log.")
       } finally {
         if (!controller.signal.aborted) setDataLoading(false)
       }
@@ -450,8 +459,20 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
     return () => controller.abort()
   }, [activeDataset, conferenceId, refreshKey, reportParams, scanPageNumber, scanSearch, scannerFilter, scanStatus])
 
+  useEffect(() => {
+    if (!conferenceId || overviewLoading || overviewRefreshing || dataLoading) return undefined
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setRefreshKey((current) => current + 1)
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [conferenceId, dataLoading, overviewLoading, overviewRefreshing])
+
   const changeConference = (nextConferenceId) => {
     setConferenceId(nextConferenceId)
+    setLastUpdatedAt("")
+    setOverview(emptyOverview)
+    setAttendeePage(emptyPage)
+    setScanPage(emptyPage)
     setDraftFilters({ eventId: "", from: "", to: "" })
     setAppliedFilters({ eventId: "", from: "", to: "" })
     setEventSummaryPageNumber(1)
@@ -471,6 +492,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
       return
     }
     setError("")
+    setLastUpdatedAt("")
     setAppliedFilters(draftFilters)
     setEventSummaryPageNumber(1)
     setScannerSummaryPageNumber(1)
@@ -481,6 +503,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
   const clearReportFilters = () => {
     const cleared = { eventId: "", from: "", to: "" }
     setDraftFilters(cleared)
+    setLastUpdatedAt("")
     setAppliedFilters(cleared)
     setEventSummaryPageNumber(1)
     setScannerSummaryPageNumber(1)
@@ -548,6 +571,10 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
           <p className="rec-muted mb-0">
             {selectedConference?.title || "Conference reporting"}
             {selectedEvent ? ` / ${selectedEvent.name}` : " / All scan events"}
+          </p>
+          <p className="rec-muted mb-0 mt-1" role="status">
+            {overviewRefreshing || dataLoading ? "Updating analytics..." : lastUpdatedAt ? `Updated ${formatDateTime(lastUpdatedAt)}` : "Waiting for first update"}
+            {" · Refreshes every 15 seconds while this tab is visible"}
           </p>
         </div>
         <div className="rec-page-actions">
