@@ -9,6 +9,7 @@ import {
   REC_TERA_HW0009_SERIALS,
   recPhoneScannerHalls,
   evaluateHidScanRules,
+  isHidLunchWindow,
   getRecScanAttendanceEligibility,
   getRecScanEventBulkDeleteValidationError,
   getRecScanEventRequiredAttendanceDays,
@@ -638,4 +639,11 @@ test("stored badge URLs recover the original token including plus signs", () => 
     recoverRecBadgeTokenFromUrl("https://rec.nrep.ug/badge/Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"),
     "Go7OLGmpWePw-KcZDUcPlqBVZrycQ95j1gddbi7Dfus"
   )
+})
+
+test("breakout-session lookup is only needed during the Kampala lunch window", () => {
+  assert.equal(isHidLunchWindow("2026-10-19T09:59:00Z"), false)
+  assert.equal(isHidLunchWindow("2026-10-19T10:00:00Z"), true)
+  assert.equal(isHidLunchWindow("2026-10-19T10:59:00Z"), true)
+  assert.equal(isHidLunchWindow("2026-10-19T11:00:00Z"), false)
 })

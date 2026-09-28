@@ -13,6 +13,10 @@ import "./rec-scanner-station.css"
 const STATION_STORAGE_KEY = "rec.tera.station.serial"
 const HID_SWEEP_IDLE_MS = 500
 const MIN_HID_SWEEP_LENGTH = 8
+// Tera guns in auto-sense mode re-read a QR for as long as it stays in view.
+// The same code arriving again within this window is one physical scan.
+const REPEAT_READ_IGNORE_MS = 5000
+const CLOCK_DRIFT_WARNING_MS = 60 * 1000
 
 function playTone(frequency, durationMs, type = "sine") {
   if (typeof window === "undefined") return
@@ -90,8 +94,18 @@ function formatClock(value = new Date()) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     timeZone: "Africa/Kampala",
   })
+}
+
+function isRepeatRead(ref, value) {
+  const now = Date.now()
+  const repeat = ref.current.value === value && now - ref.current.at < REPEAT_READ_IGNORE_MS
+  // Slide the window while the code stays in view, so a badge held under an
+  // auto-sensing gun is ignored until it has been away for the full window.
+  ref.current = { value, at: now }
+  return repeat
 }
 
 function UnlockCard({ unit, kind = "hall" }) {
@@ -180,6 +194,18 @@ export default function RecScannerPage() {
   const stationTokenRef = useRef("")
   const recentPollRef = useRef(false)
   const recentRefreshPendingRef = useRef(false)
+  const lastBadgeReadRef = useRef({ value: "", at: 0 })
+  const lastSerialReadRef = useRef({ value: "", at: 0 })
+  const serverClockOffsetRef = useRef(0)
+  const [clockDriftMs, setClockDriftMs] = useState(0)
+
+  const syncServerClock = useCallback((serverNow) => {
+    const serverMs = Date.parse(serverNow || "")
+    if (Number.isNaN(serverMs)) return
+    const offset = serverMs - Date.now()
+    serverClockOffsetRef.current = offset
+    setClockDriftMs(offset)
+  }, [])
 
   const focusCapture = useCallback(() => {
     inputRef.current?.focus({ preventScroll: true })
@@ -203,6 +229,7 @@ export default function RecScannerPage() {
     setFeedError("")
     setHistoryRefreshTick(0)
     recentRefreshPendingRef.current = false
+    lastBadgeReadRef.current = { value: "", at: 0 }
     window.sessionStorage.removeItem(STATION_STORAGE_KEY)
     alertQueueRef.current = []
     alertSeenRef.current = new Set()
@@ -223,6 +250,7 @@ export default function RecScannerPage() {
         `/api/v1/rec/scanner/scans?serialNumber=${encodeURIComponent(serial)}`,
         { cache: "no-store" }
       )
+      syncServerClock(response.headers.get("date"))
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
         throw new Error(payload.error || HID_SCAN_CODES.DEVICE_UNREGISTERED)
@@ -246,7 +274,7 @@ export default function RecScannerPage() {
       setLoadingStation(false)
       focusCapture()
     }
-  }, [focusCapture])
+  }, [focusCapture, syncServerClock])
 
   const processScanQueue = useCallback(async () => {
     if (processingRef.current) return
@@ -366,7 +394,10 @@ export default function RecScannerPage() {
       )
       if (!response.ok) return
       const payload = await response.json().catch(() => ({}))
-      if (payload.now) alertSinceRef.current = payload.now
+      if (payload.now) {
+        alertSinceRef.current = payload.now
+        syncServerClock(payload.now)
+      }
       const incoming = Array.isArray(payload.alerts) ? payload.alerts : []
       const fresh = incoming.filter((alert) => alert.id && !alertSeenRef.current.has(alert.id))
       fresh.forEach((alert) => alertSeenRef.current.add(alert.id))
@@ -375,7 +406,7 @@ export default function RecScannerPage() {
     } catch {
       // Best-effort. A missed poll just gets picked up next tick.
     }
-  }, [enqueueCrossStationAlerts, serialNumber])
+  }, [enqueueCrossStationAlerts, serialNumber, syncServerClock])
 
   const fetchTally = useCallback(async () => {
     if (!serialNumber || !stationTokenRef.current) return
@@ -452,6 +483,10 @@ export default function RecScannerPage() {
       timeZone: "Africa/Kampala",
     })
     if (!serialNumber) {
+      if (isRepeatRead(lastSerialReadRef, scanned)) {
+        setCaptureStatus(`Station QR read again at ${receivedAt} and ignored. Move the Tera away from the screen, then scan once.`)
+        return
+      }
       setCaptureStatus(`Station input detected at ${receivedAt}; completed by ${completion}.`)
       if (isTeraHardwareSerial(scanned)) {
         unlockStation(scanned)
@@ -463,6 +498,10 @@ export default function RecScannerPage() {
       return
     }
 
+    if (isRepeatRead(lastBadgeReadRef, scanned)) {
+      setCaptureStatus(`Same badge read again at ${receivedAt} and ignored. Move it away from the Tera before the next badge.`)
+      return
+    }
     setCaptureStatus(`Badge input detected and sent at ${receivedAt}; completed by ${completion}.`)
     submitScan(scanned)
   }, [serialNumber, submitScan, unlockStation])
@@ -490,9 +529,10 @@ export default function RecScannerPage() {
   }, [finishSweep])
 
   useEffect(() => {
-    const tick = () => setClock(formatClock())
+    // Show server time, not the laptop's own clock, which may be wrong.
+    const tick = () => setClock(formatClock(new Date(Date.now() + serverClockOffsetRef.current)))
     tick()
-    const timer = window.setInterval(tick, 15000)
+    const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -539,7 +579,7 @@ export default function RecScannerPage() {
       return undefined
     }
     fetchTally()
-    const timer = window.setInterval(fetchTally, 20000)
+    const timer = window.setInterval(fetchTally, 60000)
     return () => window.clearInterval(timer)
   }, [fetchTally, serialNumber])
 
@@ -626,6 +666,9 @@ export default function RecScannerPage() {
   }, [appendCapturedText, finishSweep])
 
   const lockStation = () => {
+    // The unlock QRs reappear on lock; do not let a gun still aimed at the
+    // screen unlock this station again straight away.
+    lastSerialReadRef.current = { value: serialNumber, at: Date.now() }
     resetStationState("")
     focusCapture()
   }
@@ -820,6 +863,13 @@ export default function RecScannerPage() {
           <div className="rec-station-capture-status" role="status">
             {captureStatus || "No scanner input detected yet. Keep this browser tab active."}
           </div>
+
+          {Math.abs(clockDriftMs) > CLOCK_DRIFT_WARNING_MS && (
+            <p className="rec-station-feed-error" role="status">
+              This laptop&apos;s clock is {Math.round(Math.abs(clockDriftMs) / 60000)} min {clockDriftMs > 0 ? "behind" : "ahead"}.
+              The station clock above shows server time, which is what scans use. Correct the laptop&apos;s date and time settings.
+            </p>
+          )}
 
           {tally?.summary && (
             <div className="rec-station-tally" aria-label="Conference-wide sign-in tally">
