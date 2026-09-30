@@ -21,9 +21,20 @@ a {
   min-height: 100vh;
   background: #e8eef2;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
   padding: 28px 16px 48px;
+}
+
+.rec-public-badge-home {
+  align-self: flex-start;
+  margin: 0 0 16px;
+  color: #176f91;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
 }
 
 .rec-public-badge-status {
@@ -79,6 +90,10 @@ a {
     background: #fff;
     padding: 0;
     display: block;
+  }
+
+  .rec-public-badge-home {
+    display: none;
   }
 }
 

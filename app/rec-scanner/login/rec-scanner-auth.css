@@ -33,6 +33,17 @@
   max-width: 560px;
 }
 
+.rec-scanner-auth-back {
+  display: inline-block;
+  margin: 0 0 14px;
+  color: #176f91;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
 .rec-scanner-auth-kicker {
   margin: 0 0 4px;
   font-size: 0.72rem;

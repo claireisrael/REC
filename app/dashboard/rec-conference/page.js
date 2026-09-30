@@ -116,6 +116,16 @@ export default function RecConferencePage() {
   const registrationMode = getRegistrationMode(activeConference)
 
   useEffect(() => {
+    const conferenceId = activeConference?.$id
+    if (!conferenceId) return
+    fetch("/api/rec/programme/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conferenceId }),
+    }).catch(() => {})
+  }, [activeConference?.$id])
+
+  useEffect(() => {
     if (!appwriteServices || (!hasRecAccess && !isSenior)) return
 
     let isMounted = true

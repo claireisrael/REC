@@ -5,7 +5,7 @@ import { Query } from "appwrite"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAppwrite } from "@/lib/appwrite/provider"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
-import { getRecBadgeViewPath } from "@/lib/rec-conference/scanning-rules.mjs"
+import { getRecBadgeViewPath, recoverRecBadgeTokenFromUrl } from "@/lib/rec-conference/scanning-rules.mjs"
 import {
   applyRecParticipantCategoryQueries,
   formatRecOptionalSessions,
@@ -41,8 +41,6 @@ import {
   faUsers,
 } from "@fortawesome/free-solid-svg-icons"
 import { formatAppwriteDateTime, getRegistrationTimestamp } from "@/lib/utils"
-import RecPrintableBadge from "@/components/rec-registration/RecPrintableBadge"
-
 const pageSizeOptions = [10, 25, 50, 100]
 const registrationTypeOptions = ["Attendee", "Exhibitor", "Sponsor"]
 const sectorOptions = ["Public", "Private", "Civil Society Organization", "Academia", "Other"]
@@ -923,22 +921,30 @@ export default function RecRegistrationsList() {
 
       {showBadgeModal && selectedRegistration && (
         <RegistrationModal
-          title="Printable badge"
+          title="Badge"
           onClose={() => !badgeLoading && setShowBadgeModal(false)}
           footer={
             <>
               <button type="button" className="rec-btn rec-btn-outline" disabled={badgeLoading} onClick={() => setShowBadgeModal(false)}>
                 Close
               </button>
-              {badgeDetails?.badgeUrl && (
+              {badgeDetails?.qrDataUrl && (
                 <a
                   className="rec-btn rec-btn-primary"
-                  href={getRecBadgeViewPath(badgeDetails.badgeUrl) || badgeDetails.badgeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={badgeDetails.qrDataUrl}
+                  download={`rec-${selectedYear}-${selectedRegistration.email}-badge-qr.png`}
                 >
                   <FontAwesomeIcon icon={faIdBadge} />
-                  Print badge
+                  Download QR
+                </a>
+              )}
+              {recoverRecBadgeTokenFromUrl(badgeDetails?.badgeUrl) && (
+                <a
+                  className="rec-btn rec-btn-outline"
+                  href={`/api/v1/rec/badges/${encodeURIComponent(recoverRecBadgeTokenFromUrl(badgeDetails.badgeUrl))}/print?format=pdf&download=1`}
+                >
+                  <FontAwesomeIcon icon={faDownload} />
+                  Download PDF
                 </a>
               )}
             </>
@@ -950,8 +956,30 @@ export default function RecRegistrationsList() {
               <p className="mt-3">Issuing secure badge QR...</p>
             </div>
           ) : badgeDetails ? (
-            <div className="rec-badge-preview rec-badge-preview-print">
-              <RecPrintableBadge badge={badgeDetails} />
+            <div className="rec-badge-preview rec-badge-preview-tag">
+              {recoverRecBadgeTokenFromUrl(badgeDetails.badgeUrl) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`/api/v1/rec/badges/${encodeURIComponent(recoverRecBadgeTokenFromUrl(badgeDetails.badgeUrl))}/print?format=png`}
+                  alt={`Badge for ${getRegistrantName(selectedRegistration)}`}
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={badgeDetails.qrDataUrl} alt={`Badge QR for ${getRegistrantName(selectedRegistration)}`} />
+              )}
+              <div>
+                <h4>{getRegistrantName(selectedRegistration)}</h4>
+                <p className="rec-muted mb-2">{selectedRegistration.email}</p>
+                <p className="rec-muted mb-0">
+                  {badgeDetails.conference?.title || badgeDetails.badgeTitle || `REC ${selectedYear}`}
+                  {badgeDetails.badgeNumberLabel ? ` · ${badgeDetails.badgeNumberLabel}` : ""}
+                </p>
+                {badgeDetails.badgeUrl && (
+                  <a className="rec-inline-link mt-2" href={getRecBadgeViewPath(badgeDetails.badgeUrl) || badgeDetails.badgeUrl} target="_blank" rel="noopener noreferrer">
+                    Open digital badge
+                  </a>
+                )}
+              </div>
             </div>
           ) : (
             <p className="mb-0">No badge QR was generated.</p>

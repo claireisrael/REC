@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   getScannerContextFromBearer,
   listRecScanEvents,
+  queueParentProgrammeSync,
 } from "@/lib/rec-conference/scanning-server"
 import { recScanningErrorResponse } from "@/lib/rec-conference/scanning-route"
 
@@ -11,6 +12,7 @@ export async function GET(request) {
   try {
     const context = await getScannerContextFromBearer(request)
     if (!context) return NextResponse.json({ error: "Scanner authentication is required" }, { status: 401 })
+    queueParentProgrammeSync(context.conferenceId)
     const events = await listRecScanEvents({ conferenceId: context.conferenceId, activeOnly: true })
     const operator = context.operator
     const filtered = events.documents.filter((event) => {

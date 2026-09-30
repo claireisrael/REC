@@ -28,6 +28,7 @@ import {
   venueMatchesAllowedList,
   isTeraScannerOperator,
   selectTeraScanEvent,
+  explainMissingTeraScanEvent,
   teraOperatorEmail,
   shouldRevokeRecScannerCredentials,
   getDefaultScannerAccessWindow,
@@ -89,6 +90,41 @@ test("date-only scan events open only on their Kampala date", () => {
   assert.equal(getRecScanEventWindowStatus(event, "2026-09-20T14:19:00Z").code, "event_not_started")
   assert.equal(getRecScanEventWindowStatus(event, "2026-10-18T21:00:00Z").code, "event_open")
   assert.equal(getRecScanEventWindowStatus(event, "2026-10-19T21:00:00Z").code, "event_ended")
+})
+
+test("a hall with no open event names the next assigned event", () => {
+  const notice = explainMissingTeraScanEvent([
+    {
+      name: "Lunch - Day 1",
+      type: "lunch",
+      isActive: true,
+      date: "2026-10-19",
+      venue: "",
+      day: 1,
+    },
+    {
+      name: "Clean Cooking",
+      type: "session_entry",
+      isActive: true,
+      venue: "Victoria Hall (Main Auditorium)",
+      startTime: "2026-10-19T05:30:00.000Z",
+      endTime: "2026-10-19T12:30:00.000Z",
+      day: 1,
+    },
+  ], {
+    deployedLocation: "Victoria Hall (Main Auditorium)",
+    now: "2026-09-29T06:51:00Z",
+    operator: {
+      allowedEventTypes: ["session_entry", "lunch"],
+      allowedVenues: ["Victoria Hall (Main Auditorium)"],
+      allowedDays: ["1", "2", "3", "4"],
+      allowedEventIds: [],
+    },
+  })
+
+  assert.match(notice.message, /Victoria Hall \(Main Auditorium\) has no scan event open right now/)
+  assert.match(notice.message, /Lunch - Day 1/)
+  assert.equal(notice.nextEvent.name, "Lunch - Day 1")
 })
 
 test("scan event setup rejects an end time before the start time", () => {
@@ -398,6 +434,51 @@ test("venue matching for scanner operators is case-insensitive and tolerates sub
       { allowedEventIds: ["strategy-1"], allowedEventTypes: ["custom"], allowedVenues: ["Main Entrance"] }
     ),
     true
+  )
+})
+
+test("a hall scanner accepts the custom event explicitly assigned to it", () => {
+  const operator = {
+    allowedEventIds: ["strategy-1"],
+    allowedEventTypes: ["session_entry", "lunch"],
+    allowedVenues: ["Kyoga Hall"],
+    allowedDays: ["1", "2", "3", "4"],
+  }
+  const strategy = {
+    $id: "strategy-1",
+    name: "Strategy meeting",
+    type: "custom",
+    venue: "Kyoga",
+    day: null,
+    date: "2026-09-29",
+    startTime: "2026-09-29T05:00:00.000+00:00",
+    endTime: "2026-09-29T20:55:00.000+00:00",
+    isActive: true,
+  }
+
+  assert.equal(eventMatchesOperatorRestrictions(strategy, operator), true)
+  assert.equal(
+    eventMatchesOperatorRestrictions(
+      { $id: "later-session", type: "session_entry", venue: "Kyoga Hall", day: 1 },
+      operator
+    ),
+    false
+  )
+  assert.equal(
+    eventMatchesOperatorRestrictions(
+      { $id: "strategy-1", type: "custom", venue: "Victoria Hall" },
+      operator
+    ),
+    false
+  )
+  assert.equal(
+    selectTeraScanEvent([strategy], {
+      assignedRole: "Hall Steward",
+      deployedLocation: "Kyoga Hall",
+      now: "2026-09-29T07:27:00.000Z",
+      operator,
+    })?.$id,
+    "strategy-1"
   )
 })
 

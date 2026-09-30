@@ -34,8 +34,8 @@ test("badge names keep selected titles such as Ms. and Mr.", () => {
 })
 
 test("REC26 badge copy uses the 2026 dates, venue, theme, and edition line", () => {
-  assert.equal(formatRecBadgeDateRange("2026-10-19", "2026-10-22", 2026), "19TH - 22ND OCT. 2026")
-  assert.equal(formatRecBadgeDateRange("", "", 2026), "19TH - 22ND OCT. 2026")
+  assert.equal(formatRecBadgeDateRange("2026-10-19", "2026-10-22", 2026), "19 - 22 OCTOBER, 2026")
+  assert.equal(formatRecBadgeDateRange("", "", 2026), "19 - 22 OCTOBER, 2026")
   assert.equal(formatRecBadgeVenue({ venue: "Kampala Serena Hotel" }), "Kampala Serena Hotel")
   assert.equal(formatRecBadgeVenue({}), "Kampala Serena Hotel")
   assert.equal(
@@ -44,10 +44,10 @@ test("REC26 badge copy uses the 2026 dates, venue, theme, and edition line", () 
   )
   assert.equal(
     formatRecBadgeTheme({}),
-    "From Systems to Scale: Powering Uganda's Green Economy"
+    "From Systems to Scale: Transforming Uganda’s Green Economy"
   )
   assert.equal(formatRecBadgeEditionLine(2026), "2026 & Expo")
-  assert.equal(formatRecBadgeHashtag(2026), "#REC26&EXPO")
+  assert.equal(formatRecBadgeHashtag(2026), "#REC26 & EXPO")
 })
 
 test("the badge prints \"Delegate\" for attendee registrations, other types unchanged", () => {

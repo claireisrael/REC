@@ -1,7 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import QRCode from "qrcode"
+import { code128DataUrl } from "@/lib/rec-conference/code128.mjs"
 import {
   HID_SCAN_CODES,
   REC_TERA_HW0009_DEPLOYMENTS,
@@ -58,6 +60,23 @@ function playCrossAlertChime() {
   window.setTimeout(() => playTone(990, 160, "triangle"), 180)
 }
 
+function formatScanClock(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return { time: "—", day: "" }
+  return {
+    time: date.toLocaleTimeString("en-UG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Africa/Kampala",
+    }),
+    day: date.toLocaleDateString("en-UG", {
+      day: "numeric",
+      month: "short",
+      timeZone: "Africa/Kampala",
+    }),
+  }
+}
+
 function formatScanTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
@@ -108,18 +127,96 @@ function isRepeatRead(ref, value) {
   return repeat
 }
 
-function UnlockCard({ unit, kind = "hall" }) {
+function isGateUnit(unit) {
+  return unit?.assignedRole === "Main Gate"
+}
+
+function findUnlockUnit(units, serialNumber) {
+  return units.find((unit) => unit.serialNumber === serialNumber) || null
+}
+
+function unlockScanError(scanned, selectedSerial, units) {
+  if (!isTeraHardwareSerial(scanned)) return "UNRECOGNIZED_DEVICE"
+  const chosen = findUnlockUnit(units, selectedSerial)
+  if (!chosen) {
+    return "Choose the Tera in your hand first. Its QR is the only one that should be on screen."
+  }
+  if (scanned === chosen.serialNumber) return ""
+  const other = findUnlockUnit(units, scanned)
+  const readName = other?.deployedLocation || scanned
+  return `That code is ${readName}, not ${chosen.deployedLocation}. Scan only the QR shown for ${chosen.deployedLocation}.`
+}
+
+function UnlockCard({ unit }) {
+  const linearCode = code128DataUrl(unit.serialNumber)
   return (
-    <article className={`rec-station-card${kind === "gate" ? " rec-station-card-gate" : ""}`}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        alt={`${unit.deployedLocation} serial ${unit.serialNumber}`}
-        src={unit.qrDataUrl}
-      />
+    <article className={`rec-station-card${isGateUnit(unit) ? " rec-station-card-gate" : ""}`}>
+      <div className="rec-station-codepad">
+        {unit.qrDataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="rec-station-qr"
+            alt={`${unit.deployedLocation} serial ${unit.serialNumber}`}
+            src={unit.qrDataUrl}
+          />
+        ) : (
+          <p>Preparing this unit&apos;s code…</p>
+        )}
+        {linearCode ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="rec-station-linear"
+            alt=""
+            src={linearCode}
+          />
+        ) : null}
+      </div>
       <strong>{unit.deployedLocation}</strong>
-      <em>{kind === "gate" ? "Main entrance" : "Hall scanner"}</em>
+      <em>{isGateUnit(unit) ? "Main entrance" : "Hall scanner"}</em>
       <code>{unit.serialNumber}</code>
     </article>
+  )
+}
+
+function unitFace(unit, index) {
+  if (isGateUnit(unit)) {
+    return { eyebrow: `Gate ${index + 1}`, title: "Main entrance", detail: "" }
+  }
+  const match = String(unit.deployedLocation || "").match(/^(.*?)\s*\((.*)\)\s*$/)
+  return {
+    eyebrow: "Hall",
+    title: match ? match[1] : unit.deployedLocation,
+    detail: match ? match[2] : "",
+  }
+}
+
+function UnitPicker({ title, units, onChoose, layout }) {
+  if (!units.length) return null
+  return (
+    <section className="rec-station-section">
+      <div className="rec-station-section-head">
+        <h2>{title}</h2>
+        <span>{units.length} {units.length === 1 ? "unit" : "units"}</span>
+      </div>
+      <div className={`rec-station-picker rec-station-picker-${layout}`}>
+        {units.map((unit, index) => {
+          const face = unitFace(unit, index)
+          return (
+            <button
+              key={unit.serialNumber}
+              className={`rec-station-pick${isGateUnit(unit) ? " rec-station-pick-gate" : ""}`}
+              type="button"
+              onClick={() => onChoose(unit.serialNumber)}
+            >
+              <span className="rec-station-pick-kicker">{face.eyebrow}</span>
+              <strong>{face.title}</strong>
+              {face.detail ? <em>{face.detail}</em> : <em className="rec-station-pick-spacer" aria-hidden="true">&nbsp;</em>}
+              <code>{unit.serialNumber}</code>
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -150,15 +247,47 @@ function scanRowFromPersisted(scan) {
   return {
     id: scan.id,
     scannedAt: scan.scannedAt,
-    name: "Badge scan",
-    email: "",
-    organization: "",
+    name: scan.name || "Badge scan",
+    email: scan.email || "",
+    organization: scan.organization || "",
     eventName: scan.eventName || "",
     venue: scan.venue || "",
-    categoryTag: "",
-    categoryDirection: "",
+    categoryTag: scan.categoryTag || "",
+    categoryDirection: scan.categoryDirection || "",
     status: scan.status || "rejected",
     note: scan.reason && scan.reason !== "ok" ? String(scan.reason).replaceAll("_", " ") : "",
+  }
+}
+
+function presentCaptureStatus(status) {
+  if (!status) return { tone: "", text: "" }
+  if (/lost focus|Incomplete|ignored/i.test(status)) return { tone: "warn", text: status }
+  const time = status.match(/at (\d{1,2}:\d{2})/)
+  if (status.startsWith("Station input detected")) {
+    return { tone: "quiet", text: time ? `Gun heard at ${time[1]}` : "Gun heard" }
+  }
+  if (status.startsWith("Badge input detected")) {
+    return { tone: "quiet", text: time ? `Badge sent at ${time[1]}` : "Badge sent" }
+  }
+  if (status.startsWith("Reading scanner")) return { tone: "quiet", text: "Reading the code…" }
+  return { tone: "quiet", text: status }
+}
+
+function mergeStationScanRow(stored, local) {
+  if (!local) return stored
+  const storedHasPerson = stored.name && stored.name !== "Badge scan"
+  return {
+    ...local,
+    ...stored,
+    name: storedHasPerson ? stored.name : (local.name || stored.name),
+    email: storedHasPerson ? stored.email : (local.email || stored.email),
+    organization: storedHasPerson ? stored.organization : (local.organization || stored.organization),
+    categoryTag: storedHasPerson ? stored.categoryTag : (local.categoryTag || stored.categoryTag),
+    categoryDirection: storedHasPerson ? stored.categoryDirection : (local.categoryDirection || stored.categoryDirection),
+    scannedAt: stored.scannedAt || local.scannedAt,
+    status: stored.status || local.status,
+    eventName: stored.eventName || local.eventName,
+    venue: stored.venue || local.venue,
   }
 }
 
@@ -178,7 +307,8 @@ export default function RecScannerPage() {
   const [loadingStation, setLoadingStation] = useState(false)
   const [feedback, setFeedback] = useState(null)
   const [scanRows, setScanRows] = useState([])
-  const [unlockCodes, setUnlockCodes] = useState([])
+  const [selectedSerial, setSelectedSerial] = useState("")
+  const [selectedQr, setSelectedQr] = useState("")
   const [clock, setClock] = useState("")
   const [crossStationAlert, setCrossStationAlert] = useState(null)
   const [tally, setTally] = useState(null)
@@ -265,7 +395,11 @@ export default function RecScannerPage() {
         openEvents: payload.openEvents || [],
         events: payload.events || [],
       })
-      window.sessionStorage.setItem(STATION_STORAGE_KEY, serial)
+      setFeedback(
+        payload.openEvents?.length || !payload.stationNotice
+          ? null
+          : { kind: "error", message: payload.stationNotice }
+      )
       playUnlockBeep()
     } catch (error) {
       setHandshakeError(error.message || HID_SCAN_CODES.DEVICE_UNREGISTERED)
@@ -447,11 +581,7 @@ export default function RecScannerPage() {
       setScanRows((previous) => {
         const localById = new Map(previous.map((row) => [row.id, row]))
         const persistedIds = new Set(persisted.map((scan) => scan.id))
-        const merged = persisted.map((scan) => {
-          const stored = scanRowFromPersisted(scan)
-          const local = localById.get(scan.id)
-          return local ? { ...stored, ...local, scannedAt: stored.scannedAt, status: stored.status } : stored
-        })
+        const merged = persisted.map((scan) => mergeStationScanRow(scanRowFromPersisted(scan), localById.get(scan.id)))
         return [...merged, ...previous.filter((row) => !persistedIds.has(row.id))]
           .sort((a, b) => Date.parse(b.scannedAt) - Date.parse(a.scannedAt))
           .slice(0, 50)
@@ -488,13 +618,16 @@ export default function RecScannerPage() {
         return
       }
       setCaptureStatus(`Station input detected at ${receivedAt}; completed by ${completion}.`)
-      if (isTeraHardwareSerial(scanned)) {
-        unlockStation(scanned)
+      const error = unlockScanError(scanned, selectedSerial, REC_TERA_HW0009_DEPLOYMENTS)
+      if (error) {
+        setHandshakeError(error)
+        playRejectBuzz()
+        if (error === "UNRECOGNIZED_DEVICE") {
+          window.setTimeout(() => setHandshakeError(""), 2200)
+        }
         return
       }
-      setHandshakeError("UNRECOGNIZED_DEVICE")
-      playRejectBuzz()
-      window.setTimeout(() => setHandshakeError(""), 2200)
+      unlockStation(scanned)
       return
     }
 
@@ -504,7 +637,7 @@ export default function RecScannerPage() {
     }
     setCaptureStatus(`Badge input detected and sent at ${receivedAt}; completed by ${completion}.`)
     submitScan(scanned)
-  }, [serialNumber, submitScan, unlockStation])
+  }, [selectedSerial, serialNumber, submitScan, unlockStation])
 
   const finishSweep = useCallback((completion) => {
     if (bufferTimerRef.current) window.clearTimeout(bufferTimerRef.current)
@@ -537,32 +670,32 @@ export default function RecScannerPage() {
   }, [])
 
   useEffect(() => {
+    // A refresh must return to the chooser. Restoring the last serial opened
+    // whichever hall was saved (often Nile) before any unit was on screen.
+    window.sessionStorage.removeItem(STATION_STORAGE_KEY)
+    focusCapture()
+  }, [focusCapture])
+
+  useEffect(() => {
+    if (!selectedSerial) {
+      setSelectedQr("")
+      return undefined
+    }
     let cancelled = false
-    Promise.all(
-      REC_TERA_HW0009_DEPLOYMENTS.map(async (unit) => ({
-        ...unit,
-        qrDataUrl: await QRCode.toDataURL(unit.serialNumber, {
-          margin: 1,
-          width: 220,
-          errorCorrectionLevel: "M",
-          color: { dark: "#102a43", light: "#ffffff" },
-        }),
-      }))
-    ).then((codes) => {
-      if (!cancelled) setUnlockCodes(codes)
+    QRCode.toDataURL(selectedSerial, {
+      margin: 2,
+      width: 240,
+      errorCorrectionLevel: "H",
+      color: { dark: "#000000", light: "#ffffff" },
+    }).then((url) => {
+      if (!cancelled) setSelectedQr(url)
+    }).catch(() => {
+      if (!cancelled) setSelectedQr("")
     })
     return () => {
       cancelled = true
     }
-  }, [])
-
-  useEffect(() => {
-    const stored = window.sessionStorage.getItem(STATION_STORAGE_KEY)
-    if (stored && isTeraHardwareSerial(stored)) {
-      unlockStation(stored)
-    }
-    focusCapture()
-  }, [focusCapture, unlockStation])
+  }, [selectedSerial])
 
   useEffect(() => {
     if (!serialNumber) return undefined
@@ -666,17 +799,23 @@ export default function RecScannerPage() {
   }, [appendCapturedText, finishSweep])
 
   const lockStation = () => {
-    // The unlock QRs reappear on lock; do not let a gun still aimed at the
-    // screen unlock this station again straight away.
+    // Hide the unlock QR immediately so a gun still aimed at the screen
+    // cannot open this station, or the unit beside it, again.
     lastSerialReadRef.current = { value: serialNumber, at: Date.now() }
+    setSelectedSerial("")
     resetStationState("")
     focusCapture()
   }
 
+  const chooseUnit = (serial) => {
+    setHandshakeError("")
+    setSelectedSerial(serial)
+    focusCapture()
+  }
   const locked = !serialNumber
-  const acceptedCount = scanRows.filter((row) => row.status === "accepted").length
-  const hallUnits = unlockCodes.filter((unit) => unit.assignedRole !== "Main Gate")
-  const gateUnits = unlockCodes.filter((unit) => unit.assignedRole === "Main Gate")
+  const hallUnits = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => !isGateUnit(unit))
+  const gateUnits = REC_TERA_HW0009_DEPLOYMENTS.filter(isGateUnit)
+  const selectedUnit = findUnlockUnit(REC_TERA_HW0009_DEPLOYMENTS, selectedSerial)
   const statusClass = handshakeError
     ? "rec-station-status rec-station-status-error"
     : loadingStation
@@ -689,19 +828,20 @@ export default function RecScannerPage() {
       : feedback
         ? "error"
         : "idle"
+  const captureNote = presentCaptureStatus(captureStatus)
 
   const scanCaptureInput = (
-    <div className="rec-station-capture-target">
-      <label htmlFor="rec-station-scan-input">Scanner input</label>
+    <div className="rec-station-capture">
+      <span className="rec-station-capture-mark" aria-hidden="true" />
       <input
         id="rec-station-scan-input"
         ref={inputRef}
-        aria-label="Scanner input"
+        aria-label={locked ? "Scan the white code on the gun" : "Scan a badge"}
         autoComplete="off"
         autoFocus
         className="rec-station-input"
         inputMode="none"
-        placeholder={locked ? "Click here, then scan the station QR" : "Click here, then scan a badge QR"}
+        placeholder={locked ? "Scan the white code on the gun" : "Scan a badge"}
         onInput={(event) => {
           // Clear the field immediately so a badge token is never displayed.
           const value = event.currentTarget.value
@@ -709,7 +849,6 @@ export default function RecScannerPage() {
           appendCapturedText(value, "input")
         }}
       />
-      <small>Keep this field focused while scanning.</small>
     </div>
   )
 
@@ -730,73 +869,47 @@ export default function RecScannerPage() {
       {locked ? (
         <>
           <header className="rec-station-top">
-            <div className="rec-station-brand">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/badge/ministry.jpeg" alt="Ministry of Energy and Mineral Development" />
-              <div>
-                <span>{formatRecEdition(2026)} &amp; Expo</span>
-                <strong>Tera scanner station</strong>
+            <div className="rec-station-mast-row">
+              <div className="rec-station-brand">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/badge/rec26-nrep.png" alt="NREP" />
+                <div>
+                  <span>{formatRecEdition(2026)} &amp; Expo</span>
+                  <strong>Tera scanner station</strong>
+                </div>
+              </div>
+              <div className="rec-station-meta">
+                <Link href="/" className="rec-station-home" onClick={(event) => event.stopPropagation()}>← Home</Link>
+                <span className="rec-station-chip">Fleet {REC_TERA_HW0009_DEPLOYMENTS.length}</span>
+                {clock && <span className="rec-station-clock">{clock}</span>}
               </div>
             </div>
-            <div className="rec-station-meta">
-              <span className="rec-station-chip">Fleet {REC_TERA_HW0009_DEPLOYMENTS.length}</span>
-              {clock && <span className="rec-station-clock">{clock}</span>}
-            </div>
+            {scanCaptureInput}
           </header>
 
-          {scanCaptureInput}
-
           <section className="rec-station-hero">
-            <p className="rec-station-kicker">Station locked</p>
-            <h1>Unlock the Tera in your hand</h1>
+            <p className="rec-station-kicker">{selectedUnit ? "Step 2 · Scan the code" : "Step 1 · Choose the gun"}</p>
+            <h1>{selectedUnit ? selectedUnit.deployedLocation : "Choose the Tera in your hand"}</h1>
             <p>
-              Plug that one gun into this laptop, then point it at the matching QR on this screen.
-              Do not use a second Tera.
+              {selectedUnit
+                ? `Point this gun at the white code. Only serial ${selectedUnit.serialNumber} unlocks this laptop.`
+                : "Select the hall or gate printed on the gun. The white code appears after that, and only that code unlocks the station."}
             </p>
           </section>
 
-          <div className="rec-station-steps">
-            <div className="rec-station-step">
-              <b>1</b>
-              <div>
-                <span>Plug in</span>
-                <small>Connect the Tera you are holding to this laptop.</small>
-              </div>
+          {!selectedUnit ? (
+            <div className="rec-station-board">
+              <UnitPicker title="Hall scanners" units={hallUnits} onChoose={chooseUnit} layout="halls" />
+              <UnitPicker title="Main entrance" units={gateUnits} onChoose={chooseUnit} layout="gates" />
             </div>
-            <div className="rec-station-step">
-              <b>2</b>
-              <div>
-                <span>Scan this screen</span>
-                <small>Point it at the QR with the same serial as that gun.</small>
-              </div>
+          ) : (
+            <div className="rec-station-solo">
+              <UnlockCard unit={{ ...selectedUnit, qrDataUrl: selectedQr }} />
+              <button className="rec-station-back" type="button" onClick={() => chooseUnit("")}>
+                Choose a different unit
+              </button>
             </div>
-            <div className="rec-station-step">
-              <b>3</b>
-              <div>
-                <span>Scan badges</span>
-                <small>After unlock, scan the attendee badge QR.</small>
-              </div>
-            </div>
-          </div>
-
-          <div className="rec-station-board">
-            <section className="rec-station-section">
-              <h2>Hall scanners</h2>
-              <div className="rec-station-grid">
-                {hallUnits.map((unit) => (
-                  <UnlockCard key={unit.serialNumber} unit={unit} />
-                ))}
-              </div>
-            </section>
-            <section className="rec-station-section">
-              <h2>Main entrance</h2>
-              <div className="rec-station-grid">
-                {gateUnits.map((unit) => (
-                  <UnlockCard key={unit.serialNumber} unit={unit} kind="gate" />
-                ))}
-              </div>
-            </section>
-          </div>
+          )}
 
           <div className={statusClass}>
             {handshakeError
@@ -809,24 +922,28 @@ export default function RecScannerPage() {
       ) : (
         <div className="rec-station-live">
           <header className="rec-station-live-head">
-            <div>
-              <p>Live station</p>
-              <h1>{allocation?.deployedLocation || "Location pending"}</h1>
-              <span>
-                {allocation?.assignedRole || "Assigned role pending"} · SN {serialNumber}
-                {allocation?.openEvents?.[0] ? ` · ${allocation.openEvents[0].name}` : ""}
-              </span>
+            <div className="rec-station-mast-row">
+              <div className="rec-station-brand">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/badge/rec26-nrep.png" alt="NREP" />
+                <div>
+                  <strong>{allocation?.deployedLocation || "Location pending"}</strong>
+                  <span>
+                    {allocation?.assignedRole || "Assigned role pending"} · SN {serialNumber}
+                    {allocation?.openEvents?.[0] ? ` · ${allocation.openEvents[0].name}` : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="rec-station-meta">
+                <Link href="/" className="rec-station-home" onClick={(event) => event.stopPropagation()}>Home</Link>
+                {clock && <span className="rec-station-clock">{clock}</span>}
+                <button className="rec-station-lock-btn" onClick={lockStation} type="button" disabled={pendingScans > 0}>
+                  Lock
+                </button>
+              </div>
             </div>
-            <div className="rec-station-meta">
-              <span className="rec-station-chip rec-station-chip-live">Unlocked</span>
-              {clock && <span className="rec-station-clock">{clock}</span>}
-              <button className="rec-station-lock-btn" onClick={lockStation} type="button" disabled={pendingScans > 0}>
-                Lock station
-              </button>
-            </div>
+            {scanCaptureInput}
           </header>
-
-          {scanCaptureInput}
 
           {pendingScans > 0 && (
             <div className="rec-station-pending" role="status">
@@ -834,35 +951,37 @@ export default function RecScannerPage() {
             </div>
           )}
 
-          <div className={`rec-station-result rec-station-result-${resultKind}`} aria-live="polite">
-            {feedback ? (
-              <>
-                <strong>{feedback.message}</strong>
-                {(feedback.categoryTag || feedback.registrantName) && (
-                  <b>{feedback.categoryTag || feedback.registrantName}</b>
-                )}
-                <p>
-                  {[
-                    feedback.registrantName && feedback.categoryTag ? feedback.registrantName : "",
-                    feedback.registrantOrg,
-                    feedback.scanType,
-                    feedback.categoryDirection ? `Direct to ${feedback.categoryDirection}` : "",
-                    feedback.hopperDetected ? "Hall change flagged" : "",
-                    feedback.detail,
-                  ].filter(Boolean).join(" · ")}
-                </p>
-              </>
-            ) : (
-              <>
-                <strong>Ready for badges</strong>
-                <p>Keep this page focused and scan the attendee QR with the same Tera.</p>
-              </>
-            )}
-          </div>
+          {feedback ? (
+            <div className={`rec-station-result rec-station-result-${resultKind}`} aria-live="polite">
+              <strong className={String(feedback.message || "").length > 40 ? "rec-station-result-detail" : ""}>
+                {feedback.message}
+              </strong>
+              {(feedback.categoryTag || feedback.registrantName) && (
+                <b className={feedback.categoryTag ? "rec-station-result-tag" : ""}>
+                  {feedback.categoryTag || feedback.registrantName}
+                </b>
+              )}
+              {feedback.scanType && (
+                <span className="rec-station-result-event">
+                  <small>Event</small>
+                  {feedback.scanType}
+                </span>
+              )}
+              <p>
+                {[
+                  feedback.registrantName && feedback.categoryTag ? feedback.registrantName : "",
+                  feedback.registrantOrg,
+                  feedback.categoryDirection ? `Direct to ${feedback.categoryDirection}` : "",
+                  feedback.hopperDetected ? "Hall change flagged" : "",
+                  feedback.detail,
+                ].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+          ) : null}
 
-          <div className="rec-station-capture-status" role="status">
-            {captureStatus || "No scanner input detected yet. Keep this browser tab active."}
-          </div>
+          {captureNote.tone === "warn" && (
+            <p className="rec-station-capture-status is-warn" role="status">{captureNote.text}</p>
+          )}
 
           {Math.abs(clockDriftMs) > CLOCK_DRIFT_WARNING_MS && (
             <p className="rec-station-feed-error" role="status">
@@ -871,35 +990,45 @@ export default function RecScannerPage() {
             </p>
           )}
 
-          {tally?.summary && (
-            <div className="rec-station-tally" aria-label="Conference-wide sign-in tally">
-              <div>
-                <strong>{tally.summary.uniqueAttendees?.toLocaleString() ?? "—"}</strong>
-                <span>Signed in</span>
+          <section className="rec-station-desk">
+            {!feedback && (
+              <div className="rec-station-ready" aria-live="polite">
+                <span className="rec-station-ready-dot" aria-hidden="true" />
+                <div>
+                  <strong>Scan a badge</strong>
+                  <p>Hold the code in front of this gun.</p>
+                </div>
+                {captureNote.tone === "quiet" && <em>{captureNote.text}</em>}
               </div>
-              <div>
-                <strong>{tally.summary.registeredAttendees?.toLocaleString() ?? "—"}</strong>
-                <span>Registered</span>
+            )}
+
+            {tally?.summary && (
+              <div className="rec-station-tally" aria-label="Conference-wide sign-in tally">
+                <div>
+                  <strong>{tally.summary.uniqueAttendees?.toLocaleString() ?? "—"}</strong>
+                  <span>Signed in</span>
+                </div>
+                <div>
+                  <strong>{tally.summary.registeredAttendees?.toLocaleString() ?? "—"}</strong>
+                  <span>Registered</span>
+                </div>
+                <div>
+                  <strong>{tally.summary.notYetScanned?.toLocaleString() ?? "—"}</strong>
+                  <span>Not yet in</span>
+                </div>
+                <div>
+                  <strong>{tally.summary.attendanceRate ?? 0}%</strong>
+                  <span>Attendance</span>
+                </div>
               </div>
-              <div>
-                <strong>{tally.summary.notYetScanned?.toLocaleString() ?? "—"}</strong>
-                <span>Not yet in</span>
-              </div>
-              <div>
-                <strong>{tally.summary.attendanceRate ?? 0}%</strong>
-                <span>Attendance</span>
-              </div>
-            </div>
-          )}
+            )}
+          </section>
 
           <main className="rec-station-body">
             <div className="rec-station-body-top">
-              <div>
-                <h2>Recent station records</h2>
-                <p>Latest 50 persisted scans for this Tera in Kampala time. Registrant details appear for scans handled in this tab. The tally above covers all stations.</p>
-              </div>
-              <span className="rec-station-chip">
-                {acceptedCount} accepted · {scanRows.length} shown
+              <h2>This station</h2>
+              <span className="rec-station-count">
+                {scanRows.length === 0 ? "No scans yet" : `${scanRows.length} recorded`}
               </span>
             </div>
 
@@ -924,11 +1053,16 @@ export default function RecScannerPage() {
                         No persisted scans for this station yet. Point the unlocked Tera at a badge QR.
                       </td>
                     </tr>
-                  ) : scanRows.map((row) => (
+                  ) : scanRows.map((row) => {
+                    const when = formatScanClock(row.scannedAt)
+                    return (
                     <tr key={row.id}>
-                      <td>{formatScanTime(row.scannedAt)}</td>
-                      <td>
-                        {row.name}
+                      <td className="rec-station-when">
+                        <strong>{when.time}</strong>
+                        {when.day && <small>{when.day}</small>}
+                      </td>
+                      <td className="rec-station-person">
+                        <strong>{row.name}</strong>
                         {row.email && <small>{row.email}</small>}
                       </td>
                       <td>
@@ -936,8 +1070,8 @@ export default function RecScannerPage() {
                         {row.categoryDirection && <small>{row.categoryDirection}</small>}
                       </td>
                       <td>{row.organization || "—"}</td>
-                      <td>
-                        {row.eventName || "—"}
+                      <td className="rec-station-event">
+                        <strong>{row.eventName || "—"}</strong>
                         {row.venue && <small>{row.venue}</small>}
                       </td>
                       <td>
@@ -945,7 +1079,8 @@ export default function RecScannerPage() {
                         {row.note && <small>{row.note}</small>}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

@@ -3460,6 +3460,20 @@ input.rec-input[type="time"] {
     padding: 10px;
 }
 
+.rec-badge-preview-tag {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+}
+
+.rec-badge-preview-tag img {
+    width: min(100%, 9.3cm);
+    height: auto;
+    aspect-ratio: 93 / 125;
+    padding: 0;
+    border-radius: 2px;
+    object-fit: contain;
+}
+
 .rec-badge-preview h4 {
     color: #0f172a;
     font-size: 1.1rem;

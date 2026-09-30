@@ -39,6 +39,7 @@ export async function GET(request) {
       allocation: handshake.allocation,
       events: handshake.events,
       openEvents: handshake.openEvents,
+      stationNotice: handshake.stationNotice || "",
       // The station must send this back as `Authorization: Bearer <token>`
       // on every following request (scans, alerts, tally). The serial number
       // alone is not a credential - it's printed on the hardware.

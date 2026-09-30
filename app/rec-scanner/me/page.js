@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   clearScannerToken,
@@ -239,6 +240,7 @@ export default function RecScannerMePage() {
             {error} Last successful information is shown. <button type="button" className="rec-scanner-auth-link" onClick={load} disabled={loading}>{loading ? "Retrying..." : "Retry"}</button>
           </div>
         )}
+        <Link href="/" className="rec-scanner-auth-back">← Home</Link>
         <p className="rec-scanner-auth-kicker">
           {profile?.conference?.title || profile?.conference?.shortName || "REC Scanner"}
         </p>

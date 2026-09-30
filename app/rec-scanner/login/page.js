@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { markJustSignedIn, setScannerToken } from "@/lib/rec-conference/scanner-session-client"
 import "./rec-scanner-auth.css"
@@ -112,6 +113,7 @@ export default function RecScannerLoginPage() {
   return (
     <div className="rec-scanner-auth">
       <div className="rec-scanner-auth-card">
+        <Link href="/" className="rec-scanner-auth-back">← Home</Link>
         <p className="rec-scanner-auth-kicker">REC Scanner</p>
         <h1>Sign in</h1>
 

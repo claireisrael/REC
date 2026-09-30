@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   createRecScanEvent,
   listRecScanEvents,
+  queueParentProgrammeSync,
 } from "@/lib/rec-conference/scanning-server"
 import { recScanningErrorResponse, requireRecScanningAdmin } from "@/lib/rec-conference/scanning-route"
 
@@ -14,6 +15,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
     const conferenceId = searchParams.get("conferenceId") || ""
+    queueParentProgrammeSync(conferenceId)
     const page = searchParams.get("page") || "1"
     const limit = searchParams.get("limit") || "25"
     return NextResponse.json(await listRecScanEvents({ conferenceId, page, limit }))

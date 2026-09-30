@@ -16,8 +16,51 @@ const NAV_ITEMS = [
   { href: "/rec-scanner", label: "Scanner" },
 ]
 
+function deskBack(pathname) {
+  const path = (pathname || "/").replace(/\/$/, "")
+  if (path === "/dashboard" || path === "/dashboard/rec-conference") {
+    return { href: "/", label: "Home" }
+  }
+  if (!path.startsWith("/dashboard")) return null
+
+  const conferenceEdit = path.match(/\/admin\/conferences\/edit\/([^/]+)$/)
+  if (conferenceEdit) {
+    return { href: `/dashboard/rec-conference/admin/conferences/${conferenceEdit[1]}`, label: "Back" }
+  }
+
+  const programEdit = path.match(/\/admin\/programs\/edit\/([^/]+)$/)
+  if (programEdit) {
+    return { href: `/dashboard/rec-conference/admin/programs/${programEdit[1]}`, label: "Back" }
+  }
+
+  const timeslots = path.match(/(\/admin\/programs\/[^/]+\/sessions)\/timeslots$/)
+  if (timeslots) return { href: `/dashboard/rec-conference${timeslots[1]}`, label: "Back" }
+
+  const session = path.match(/(\/admin\/programs\/[^/]+\/sessions)\/[^/]+$/)
+  if (session) return { href: `/dashboard/rec-conference${session[1]}`, label: "Back" }
+
+  const sessions = path.match(/(\/admin\/programs\/[^/]+)\/sessions$/)
+  if (sessions) return { href: `/dashboard/rec-conference${sessions[1]}`, label: "Back" }
+
+  if (/\/admin\/registrations\/(new|import|.+\/edit)$/.test(path)) {
+    return { href: "/dashboard/rec-conference/admin/registrations", label: "Back" }
+  }
+  if (/\/admin\/programs\/new$/.test(path) || /\/admin\/programs\/[^/]+$/.test(path)) {
+    return { href: "/dashboard/rec-conference/admin/programs", label: "Back" }
+  }
+  if (/\/admin\/conferences\/(new|[^/]+)$/.test(path)) {
+    return { href: "/dashboard/rec-conference/admin/conferences", label: "Back" }
+  }
+  if (/\/admin\/scanning\/(?!events$).+/.test(path)) {
+    return { href: "/dashboard/rec-conference/admin/scanning/events", label: "Back" }
+  }
+
+  return { href: "/dashboard/rec-conference", label: "Back" }
+}
+
 export default function DashboardLayout({ children }) {
   const pathname = usePathname()
+  const back = deskBack(pathname)
 
   return (
     <div>
@@ -35,6 +78,11 @@ export default function DashboardLayout({ children }) {
           color: "#fff",
         }}
       >
+        {back && (
+          <Link href={back.href} style={{ color: "#fff", textDecoration: "none", fontWeight: 700, fontSize: "0.85rem", whiteSpace: "nowrap" }}>
+            ← {back.label}
+          </Link>
+        )}
         <Link href="/dashboard/rec-conference" style={{ fontWeight: 800, textDecoration: "none" }}>
           REC Test
         </Link>

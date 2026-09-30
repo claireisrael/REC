@@ -1,0 +1,208 @@
+.rec-home {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  color: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.rec-home-slides,
+.rec-home-slides img,
+.rec-home-shade {
+  position: absolute;
+  inset: 0;
+}
+
+.rec-home-slides img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.08);
+  transition: opacity 1.15s ease;
+}
+
+.rec-home-slides img.is-active {
+  z-index: 1;
+  opacity: 1;
+  animation: rec-home-drift var(--rec-home-dwell) ease-in-out forwards;
+}
+
+.rec-home-slides img.is-active:nth-child(3n + 2) {
+  animation-name: rec-home-drift-across;
+}
+
+.rec-home-slides img.is-active:nth-child(3n + 3) {
+  animation-name: rec-home-drift-down;
+}
+
+@keyframes rec-home-drift {
+  from { transform: scale(1.14) translate3d(1.2%, 0, 0); }
+  to { transform: scale(1.04) translate3d(-1.4%, -1%, 0); }
+}
+
+@keyframes rec-home-drift-across {
+  from { transform: scale(1.08) translate3d(-1.8%, 0.4%, 0); }
+  to { transform: scale(1.16) translate3d(1.2%, -0.8%, 0); }
+}
+
+@keyframes rec-home-drift-down {
+  from { transform: scale(1.16) translate3d(0, -1.4%, 0); }
+  to { transform: scale(1.05) translate3d(-0.8%, 1%, 0); }
+}
+
+.rec-home-shade {
+  background: linear-gradient(90deg, rgba(8, 24, 32, 0.22) 0%, rgba(8, 24, 32, 0.06) 38%, transparent 68%);
+}
+
+.rec-home-panel {
+  position: relative;
+  z-index: 1;
+  width: min(560px, calc(100% - 32px));
+  margin: 24px 16px 28px;
+  padding: 22px 20px 18px;
+  border-radius: 22px;
+  background: rgba(251, 248, 241, 0.94);
+  color: #102a43;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 40px rgba(8, 24, 32, 0.16);
+}
+
+.rec-home-mark {
+  width: 64px;
+  height: 42px;
+  object-fit: cover;
+  object-position: right center;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.rec-home-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #176f91;
+}
+
+.rec-home h1 {
+  margin: 6px 0 0;
+  color: #102a43;
+  font-size: clamp(2rem, 8vw, 3rem);
+  line-height: 0.95;
+  font-weight: 900;
+}
+
+.rec-home-when {
+  margin: 10px 0 0;
+  color: #3d5c6e;
+  font-weight: 700;
+}
+
+.rec-home-copy {
+  margin: 12px 0 0;
+  color: #102a43;
+  line-height: 1.5;
+}
+
+.rec-home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.rec-home-primary,
+.rec-home-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.rec-home-primary {
+  background: #f0a428;
+  color: #1c1408;
+}
+
+.rec-home-secondary {
+  background: transparent;
+  color: #176f91;
+  border: 1px solid rgba(23, 111, 145, 0.45);
+}
+
+.rec-home-dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.rec-home-dots button {
+  position: relative;
+  overflow: hidden;
+  width: 36px;
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(16, 42, 67, 0.18);
+  padding: 0;
+}
+
+.rec-home-dots button.is-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #176f91;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: rec-home-meter var(--rec-home-dwell) linear forwards;
+}
+
+@keyframes rec-home-meter {
+  to { transform: scaleX(1); }
+}
+
+@media (min-width: 800px) {
+  .rec-home {
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .rec-home-panel {
+    margin-left: 48px;
+  }
+
+  .rec-home-actions {
+    flex-direction: row;
+  }
+
+  .rec-home-primary,
+  .rec-home-secondary {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-home-slides img,
+  .rec-home-dots button.is-active::after {
+    animation: none;
+    transition: none;
+  }
+
+  .rec-home-slides img.is-active {
+    transform: none;
+  }
+
+  .rec-home-dots button.is-active::after {
+    transform: scaleX(1);
+  }
+}

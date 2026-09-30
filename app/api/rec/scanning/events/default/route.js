@@ -10,10 +10,14 @@ export async function POST(request) {
 
   try {
     const data = await request.json()
-    const created = await generateDefaultRecScanEvents(data.conferenceId, auth.session.userId, {
+    const result = await generateDefaultRecScanEvents(data.conferenceId, auth.session.userId, {
       includeSessions: data.includeSessions !== false,
     })
-    return NextResponse.json({ created, count: created.length }, { status: 201 })
+    return NextResponse.json({
+      created: result.created,
+      count: result.created.length,
+      parentSync: result.parentSync,
+    }, { status: 201 })
   } catch (error) {
     return recScanningErrorResponse(error, "Failed to generate default REC scan events")
   }

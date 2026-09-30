@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import RecRegistrationForm from "@/components/rec-registration/RecRegistrationForm"
 
 export default function RecRegistrationPage() {
@@ -13,6 +14,9 @@ export default function RecRegistrationPage() {
         }}
       >
         <div style={{ maxWidth: 920, margin: "0 auto" }}>
+          <Link href="/" style={{ display: "inline-block", marginBottom: 10, color: "#F5C078", fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", textDecoration: "none" }}>
+            ← Home
+          </Link>
           <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#F5C078" }}>
             Renewable Energy Conference & Expo
           </div>

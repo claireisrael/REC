@@ -3,3 +3,17 @@
 node_modules/
 .next/
 scripts/.rec-appwrite-inventory.json
+
+# Nested checkout of the parent HR app. It has its own secrets.
+NREP-HR-project/
+
+# Local helper that reads the parent checkout and must not be committed.
+scripts/sync-parent-programme.mjs
+
+# Local badge artwork the app does not use.
+public/badge/Copy of REC26TAGS TEMPLATE.pdf
+public/badge/rec26-plate.jpg
+public/badge/rec26-paper.jpg
+public/badge/rec26-footer.jpg
+public/badge/rec26-ministry.png
+

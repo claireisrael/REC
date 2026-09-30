@@ -778,7 +778,10 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conferenceId, includeSessions: true }),
       })
-      setSuccess(`Generated ${data.count || 0} default scan events.`)
+      const syncedSessions = data.parentSync?.sessions || 0
+      setSuccess(syncedSessions
+        ? `Synced ${syncedSessions} programme sessions from the parent system. Added ${data.parentSync?.createdEvents || 0} scan events and updated ${data.parentSync?.updatedEvents || 0}.`
+        : `Generated ${data.count || 0} default scan events.`)
       await loadWorkspace()
     } catch (err) {
       setError(err.message || "Failed to generate defaults.")
@@ -1502,7 +1505,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     Badge Registry
                   </h3>
                   <p className="rec-muted mb-0 mt-1">
-                    Generate digital QR badges for registrants, email secure badge links, and revoke active badges when needed. Generate for print creates an active badge without emailing it; then use Open → Print badge.
+                    Each person with a badge has a card link. Select people and use Print page to open those cards together.
                   </p>
                 </div>
                 <div className="rec-page-actions">
@@ -1518,6 +1521,19 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   >
                     {saving === "badges" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faPaperPlane} />}
                     Generate Visible Missing
+                  </button>
+                  <button
+                    type="button"
+                    className="rec-btn rec-btn-outline"
+                    onClick={() => {
+                      if (!conferenceId || selectedBadgeRegistrations.length === 0) return
+                      const url = `/rec-print?conferenceId=${encodeURIComponent(conferenceId)}&ids=${encodeURIComponent(selectedBadgeRegistrations.join(","))}`
+                      window.open(url, "_blank", "noopener,noreferrer")
+                    }}
+                    disabled={selectedBadgeRegistrations.length === 0}
+                  >
+                    <FontAwesomeIcon icon={faPrint} />
+                    Print page ({selectedBadgeRegistrations.length})
                   </button>
                   <button
                     type="button"
