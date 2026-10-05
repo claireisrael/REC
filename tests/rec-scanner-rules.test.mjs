@@ -34,6 +34,7 @@ import {
   getDefaultScannerAccessWindow,
   resolveTeraOperatorAccess,
   shouldSendRecScanConfirmationEmail,
+  unregisteredAttendeeAllowedAtEvent,
   getRecScanConfirmationCopy,
   getRecBadgeViewPath,
   expandRecBadgeTokenCandidates,
@@ -623,6 +624,20 @@ test("scan confirmation emails are sent for accepted non-lunch scans", () => {
     eventType: "conference_entry",
     email: "",
   }), false)
+  assert.equal(shouldSendRecScanConfirmationEmail({
+    status: "accepted",
+    eventType: "conference_entry",
+    email: "unregistered@example.invalid",
+    registrationType: "Unregistered",
+  }), false)
+})
+
+test("unregistered codes are accepted where attendees are accepted", () => {
+  const walkIn = { registrationType: "Unregistered" }
+  assert.equal(unregisteredAttendeeAllowedAtEvent(walkIn, { allowedRegistrationTypes: [] }), true)
+  assert.equal(unregisteredAttendeeAllowedAtEvent(walkIn, { allowedRegistrationTypes: ["Attendee"] }), true)
+  assert.equal(unregisteredAttendeeAllowedAtEvent(walkIn, { allowedRegistrationTypes: ["Sponsor"] }), false)
+  assert.equal(unregisteredAttendeeAllowedAtEvent({ registrationType: "Attendee" }, { allowedRegistrationTypes: ["Attendee"] }), false)
 })
 
 test("scan confirmation emails follow the scanned event and link to the REC web app", () => {

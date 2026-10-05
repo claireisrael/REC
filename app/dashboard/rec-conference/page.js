@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import {
   faArrowRight,
+  faBookOpen,
   faCalendar,
   faChartLine,
   faCog,
@@ -231,6 +232,15 @@ export default function RecConferencePage() {
           href: "/dashboard/rec-conference/admin/scanning",
           cta: "Manage scanning",
           meta: "Badges & attendance",
+        },
+        {
+          title: "Rapporteur reports",
+          description: "Assign a hall, then review each session report before it is filed.",
+          icon: faBookOpen,
+          tone: "dark",
+          href: "/dashboard/rec-conference/admin/reporting",
+          cta: "Open reports",
+          meta: "REC26 sessions",
         },
         {
           title: "Media Library",

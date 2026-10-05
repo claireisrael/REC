@@ -11,7 +11,7 @@ import RecRegistrationStepper, {
   RecRegistrationReviewList,
 } from "@/components/rec-registration/RecRegistrationStepper"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
-import { formatRecParticipantCategory, normalizeRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
+import { formatRecParticipantCategory, formatRecParticipantCategoryTag, normalizeRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
 import { validateEmail } from "@/lib/utils/validation"
 
 const titleOptions = ["Dr.", "Mr.", "Ms.", "Mrs.", "Rev.", "Prof.", "Eng.", "Prof.Eng."]
@@ -489,6 +489,7 @@ export default function RecRegistrationForm() {
                 { label: "Registering as", value: formData.registrationType },
                 { label: "Days attending", value: formData.daysAttending.join(", ") },
                 { label: "Participant category", value: formatRecParticipantCategory(formData.additionalSessions, conference?.year) },
+                { label: "Tag", value: formatRecParticipantCategoryTag(formData.additionalSessions, conference?.year) },
                 { label: "Coupon", value: formData.coupon },
                 { label: "Visa letter", value: formData.visaLetterRequired ? `Yes${formData.passportNumber ? ` (${formData.passportNumber})` : ""}` : "No" },
                 { label: "Comments", value: formData.additionalComments },

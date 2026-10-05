@@ -16,6 +16,7 @@ export async function GET(request) {
       limit: searchParams.get("limit") || 25,
       status: searchParams.get("status") || "all",
       search: searchParams.get("search") || "",
+      idsOnly: searchParams.get("ids") === "1",
     })
     return NextResponse.json(result)
   } catch (error) {

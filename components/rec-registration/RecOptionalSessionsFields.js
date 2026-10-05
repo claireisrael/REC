@@ -31,7 +31,12 @@ export default function RecOptionalSessionsFields({
             id={`${idPrefix}-${category.value}`}
             checked={selectedCategory === category.value}
             onChange={() => onChange([...category.sessions])}
-            label={<span className="fw-semibold">{category.getLabel(edition)}</span>}
+            label={(
+              <span className="fw-semibold">
+                {category.getLabel(edition)}
+                {category.tag ? <span className="fw-normal text-muted"> · {category.tag}</span> : null}
+              </span>
+            )}
           />
         ))}
       </div>
