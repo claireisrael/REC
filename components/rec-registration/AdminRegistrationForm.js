@@ -8,7 +8,7 @@ import countries from "world-countries"
 import { validateEmail } from "@/lib/utils/validation"
 import { formatAppwriteDate } from "@/lib/utils"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
-import { formatRecParticipantCategory, normalizeRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
+import { formatRecParticipantCategory, formatRecParticipantCategoryTag, normalizeRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
 import RecOptionalSessionsFields from "@/components/rec-registration/RecOptionalSessionsFields"
 import RecRegistrationStepper, {
   REC_REGISTRATION_STEPS,
@@ -563,6 +563,7 @@ export default function AdminRegistrationForm({
                 { label: "Registration type", value: formData.registrationType },
                 { label: "Days attending", value: formData.daysAttending.join(", ") },
                 { label: "Participant category", value: formatRecParticipantCategory(formData.additionalSessions, conference?.year) },
+                { label: "Tag", value: formatRecParticipantCategoryTag(formData.additionalSessions, conference?.year) },
                 { label: "Visa letter", value: formData.visaLetterRequired ? `Yes${formData.passportNumber ? ` (${formData.passportNumber})` : ""}` : "No" },
                 { label: "Comments", value: formData.additionalComments },
               ]}

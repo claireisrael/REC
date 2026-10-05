@@ -9,6 +9,7 @@ import { getRecBadgeViewPath, recoverRecBadgeTokenFromUrl } from "@/lib/rec-conf
 import {
   applyRecParticipantCategoryQueries,
   formatRecOptionalSessions,
+  formatRecParticipantCategoryTag,
   recParticipantCategoryFilterOptions,
   registrationMatchesParticipantCategory,
 } from "@/lib/rec-conference/registration-tracks.mjs"
@@ -1035,6 +1036,7 @@ function RegistrationDetails({ registration, selectedYear }) {
         <DetailField label="Conference Years" value={Array.isArray(registration.conferenceYears) ? registration.conferenceYears.map(formatRecEdition).join(", ") : ""} />
         <DetailField label="Days Attending" value={Array.isArray(registration.daysAttending) ? registration.daysAttending.join(", ") : ""} />
         <DetailField label="Participant category" value={formatRecOptionalSessions(registration.additionalSessions, selectedYear).join(", ")} />
+        <DetailField label="Tag" value={formatRecParticipantCategoryTag(registration, selectedYear)} />
         {registration.registrationType === "Exhibitor" && (
           <DetailField label="Exhibition Details" value={registration.exhibitionDetails} />
         )}

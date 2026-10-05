@@ -15,13 +15,14 @@ export default function RecPrintableBadge({
   const bleedQuery = bleed ? "&bleed=true" : ""
   const imageSrc = encoded ? `/api/v1/rec/badges/${encoded}/print?format=png` : ""
   const pdfHref = encoded ? `/api/v1/rec/badges/${encoded}/print?format=pdf&download=1${bleedQuery}` : ""
+  const printHref = encoded ? `/api/v1/rec/badges/${encoded}/print?format=pdf${bleedQuery}` : ""
   const pngHref = encoded ? `/api/v1/rec/badges/${encoded}/print?format=png&download=1${bleedQuery}` : ""
 
   return (
     <div className="rec-print-badge-wrap">
       {showActions && (
         <div className="rec-print-badge-actions">
-          <button type="button" className="rec-print-badge-print" onClick={() => window.print()}>
+          <button type="button" className="rec-print-badge-print" onClick={() => window.open(printHref, "_blank")}>
             Print badge
           </button>
           {pdfHref && <a className="rec-print-badge-download" href={pdfHref}>Download PDF</a>}
