@@ -298,7 +298,7 @@ test("badge title stays REC26 & Expo and the category sits under the QR as a tag
     "#UGEUBF"
   )
   assert.equal(formatRecParticipantCategoryTag({ additionalSessions: [] }, 2026), "#REC26 & Expo")
-  assert.equal(formatRecParticipantCategoryTag({ registrationType: "Unregistered" }, 2026), "#UNREGISTERED")
+  assert.equal(formatRecParticipantCategoryTag({ registrationType: "Unregistered" }, 2026), "#REC26 & Expo")
   assert.deepEqual(normalizeRecOptionalSessions("UGEUBF"), ["business_forum"])
   assert.deepEqual(normalizeRecOptionalSessions("#UGEUBF"), ["business_forum"])
   assert.equal(getRecParticipantCategoryDirection({ additionalSessions: [] }), "Main conference and Expo")

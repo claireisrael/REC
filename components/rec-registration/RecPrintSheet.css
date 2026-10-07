@@ -86,12 +86,12 @@
   width: 297mm;
   height: 420mm;
   display: grid;
-  grid-template-columns: repeat(2, 93mm);
+  grid-template-columns: repeat(3, 93mm);
   grid-template-rows: repeat(3, 125mm);
   justify-content: center;
   align-content: center;
-  column-gap: 15mm;
-  row-gap: 12mm;
+  column-gap: 6mm;
+  row-gap: 8mm;
   background: #fff;
   box-shadow: 0 12px 32px rgba(16, 42, 67, 0.12);
 }
