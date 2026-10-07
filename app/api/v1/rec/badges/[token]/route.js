@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server"
 import { resolvePublicRecBadge } from "@/lib/rec-conference/scanning-server"
-import { recScanningErrorResponse } from "@/lib/rec-conference/scanning-route"
+import { recScanningErrorResponse, requireRecScanningAdmin } from "@/lib/rec-conference/scanning-route"
 
 export const runtime = "nodejs"
 
-export async function GET(_request, { params }) {
+async function viewerIsStaff(request) {
+  try {
+    return (await requireRecScanningAdmin(request)).ok === true
+  } catch {
+    return false
+  }
+}
+
+export async function GET(request, { params }) {
   try {
     const { token } = await params
-    const badge = await resolvePublicRecBadge(token)
-    return NextResponse.json(badge, {
+    const [badge, staff] = await Promise.all([resolvePublicRecBadge(token), viewerIsStaff(request)])
+    return NextResponse.json({ ...badge, viewerCanPrint: staff }, {
       headers: {
         "Cache-Control": "no-store",
       },

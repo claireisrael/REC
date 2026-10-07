@@ -57,5 +57,5 @@ export default function RecPublicBadgePage() {
     )
   }
 
-  return <RecPrintableBadge badge={badge} showActions />
+  return <RecPrintableBadge badge={badge} showActions={badge.viewerCanPrint === true} />
 }

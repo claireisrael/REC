@@ -9,8 +9,10 @@ import {
   formatRecBadgeRoleLabel,
   formatRecBadgeTheme,
   formatRecBadgeVenue,
+  formatDelegateSerial,
   formatRecBadgeCardCopy,
   formatRecWalkInBadgeName,
+  readDelegateSerial,
   resolveRecBadgeRole,
 } from "../lib/rec-conference/rec-badge-display.mjs"
 
@@ -60,16 +62,20 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
   assert.equal(formatRecBadgeRoleLabel("attendee"), "Delegate")
   assert.equal(formatRecBadgeRoleLabel("Unregistered"), "Delegate")
   assert.equal(formatRecWalkInBadgeName({ registrationType: "Unregistered", firstName: "Unregistered", lastName: "REC26-000008" }), "Delegate REC26-000008")
+  assert.equal(formatDelegateSerial(1), "D-001")
+  assert.equal(formatDelegateSerial(12), "D-012")
+  assert.equal(formatDelegateSerial(1000), "D-1000")
+  assert.equal(readDelegateSerial("d-007"), 7)
   assert.deepEqual(
-    formatRecBadgeCardCopy({ registrationType: "Unregistered", name: "Delegate REC26-000008", organization: "Not registered" }),
+    formatRecBadgeCardCopy({ registrationType: "Unregistered", name: "Delegate REC26-000008", organization: "D-001" }),
+    { name: "Delegate", underName: "D-001" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({ registrationType: "Unregistered", organization: "Not registered" }),
     { name: "Delegate", underName: "" }
   )
   assert.deepEqual(
-    formatRecBadgeCardCopy({ organization: "Non registered", name: "Unregistered REC26-000009" }),
-    { name: "Delegate", underName: "" }
-  )
-  assert.deepEqual(
-    formatRecBadgeCardCopy({ name: "Claire Namagala", organization: "NREP" }),
+    formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Claire Namagala", organization: "NREP" }),
     { name: "Claire Namagala", underName: "NREP" }
   )
   assert.equal(formatRecBadgeRoleLabel("Exhibitor"), "Exhibitor")
