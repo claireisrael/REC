@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation"
 import RecPrintableBadge from "@/components/rec-registration/RecPrintableBadge"
 import "./RecPrintSheet.css"
 
-const SHEET_SIZE = 6
+const SHEET_SIZE = 9
 const REQUEST_SIZE = 40
 const BATCH_STORAGE_KEY = "rec-print-batch"
 

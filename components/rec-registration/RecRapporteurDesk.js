@@ -11,6 +11,7 @@ import {
   faSave,
   faSpinner,
   faTrash,
+  faUpRightFromSquare,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons"
 import { downloadRapporteurReport, rapporteurDocumentHtml } from "@/lib/rec-conference/rapporteur-rules.mjs"
@@ -714,12 +715,24 @@ export default function RecRapporteurDesk({ initialConferenceId = "", initialRep
                     <span>{accessSummary(item)}</span>
                   </div>
                   <div className="rec-approve-person-actions">
-                    <Link href={`/reporting?assignment=${item.$id}`} target="_blank" rel="noopener noreferrer">Dashboard</Link>
+                    <Link className="rec-approve-action rec-approve-action-open" href={`/reporting?assignment=${item.$id}`} target="_blank" rel="noopener noreferrer">
+                      <FontAwesomeIcon icon={faUpRightFromSquare} />
+                      Dashboard
+                    </Link>
                     {reports.some((report) => report.authorEmail === item.email) ? (
-                      <button type="button" onClick={() => { setReportFocus(item.email); setView("reports"); setDetail(null) }}>Reports</button>
+                      <button type="button" className="rec-approve-action rec-approve-action-reports" onClick={() => { setReportFocus(item.email); setView("reports"); setDetail(null) }}>
+                        <FontAwesomeIcon icon={faBookOpen} />
+                        Reports
+                      </button>
                     ) : null}
-                    <button type="button" onClick={() => editAssignment(item)} disabled={busy}>Edit</button>
-                    <button type="button" onClick={() => setPendingRemove(item)} disabled={busy}>Delete</button>
+                    <button type="button" className="rec-approve-action rec-approve-action-edit" onClick={() => editAssignment(item)} disabled={busy}>
+                      <FontAwesomeIcon icon={faPenToSquare} />
+                      Edit
+                    </button>
+                    <button type="button" className="rec-approve-action rec-approve-action-delete" onClick={() => setPendingRemove(item)} disabled={busy}>
+                      <FontAwesomeIcon icon={faTrash} />
+                      Delete
+                    </button>
                   </div>
                 </article>
               ))}

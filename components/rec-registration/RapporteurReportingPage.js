@@ -65,6 +65,7 @@ export default function ReportingPage() {
   const [busy, setBusy] = useState(false)
   const revision = useRef(1)
   const dirty = useRef(false)
+  const previewAssignment = useRef("")
   const reportRef = useRef(null)
   const contentRef = useRef(null)
   const saveTimer = useRef(null)
@@ -73,6 +74,10 @@ export default function ReportingPage() {
   useEffect(() => {
     reportRef.current = report
   }, [report])
+
+  useEffect(() => {
+    previewAssignment.current = home?.preview ? home.assignmentId || "" : ""
+  }, [home])
 
   useEffect(() => {
     const assignmentId = new URLSearchParams(window.location.search).get("assignment") || ""
@@ -91,8 +96,12 @@ export default function ReportingPage() {
 
   useEffect(() => {
     if (!report || (report.status !== "submitted" && report.status !== "returned")) return undefined
+    const assignmentId = previewAssignment.current
+    const url = assignmentId
+      ? `/api/rec/rapporteur/preview-report?assignmentId=${encodeURIComponent(assignmentId)}&sessionKey=${encodeURIComponent(report.sessionKey)}&commentsOnly=1`
+      : `/api/reporting/comments?sessionKey=${encodeURIComponent(report.sessionKey)}`
     const timer = setInterval(() => {
-      fetchJson(`/api/reporting/comments?sessionKey=${encodeURIComponent(report.sessionKey)}`)
+      fetchJson(url)
         .then((data) => setComments(data.comments || []))
         .catch(() => null)
     }, 8000)
@@ -104,9 +113,12 @@ export default function ReportingPage() {
     if (!current || current.sessionKey !== sessionKey) return Promise.resolve()
     if (current.status !== "draft" && current.status !== "returned") return Promise.resolve()
     if (contentRef.current !== next) return Promise.resolve()
-    return fetchJson("/api/reporting/report", {
+    const assignmentId = previewAssignment.current
+    return fetchJson(assignmentId ? "/api/rec/rapporteur/preview-report" : "/api/reporting/report", {
       method: "PUT",
-      body: JSON.stringify({ sessionKey, content: next, expectedRevision: revision.current }),
+      body: JSON.stringify(assignmentId
+        ? { assignmentId, sessionKey, content: next, expectedRevision: revision.current }
+        : { sessionKey, content: next, expectedRevision: revision.current }),
     })
       .then((data) => {
         revision.current = data.revision
@@ -192,24 +204,12 @@ export default function ReportingPage() {
     setNotice("")
     try {
       if (home?.preview) {
-        const session = (home.sessions || []).find((item) => item.sessionKey === sessionKey)
-        if (!session?.reportId) {
-          setReport({
-            ...session,
-            authorName: home.name,
-            authorEmail: home.email,
-            status: "new",
-            mediaLinks: [],
-            content: {},
-          })
-          setContent({})
-          setComments([])
-          return
-        }
-        const detail = await fetchJson(`/api/rec/rapporteur/review?reportId=${encodeURIComponent(session.reportId)}`)
-        setReport(detail.report)
-        setContent(detail.report?.content || {})
-        setComments(detail.comments || [])
+        const data = await fetchJson(`/api/rec/rapporteur/preview-report?assignmentId=${encodeURIComponent(home.assignmentId)}&sessionKey=${encodeURIComponent(sessionKey)}`)
+        revision.current = data.report?.revision || 1
+        dirty.current = false
+        setReport(data.report)
+        setContent(data.report?.content || {})
+        setComments(data.comments || [])
         return
       }
       const data = await fetchJson(`/api/reporting/report?sessionKey=${encodeURIComponent(sessionKey)}`)
@@ -232,25 +232,35 @@ export default function ReportingPage() {
     clearTimeout(saveTimer.current)
     try {
       await saveChain.current
+      const assignmentId = previewAssignment.current
       if (dirty.current) {
-        const savedReport = await fetchJson("/api/reporting/report", {
+        const savedReport = await fetchJson(assignmentId ? "/api/rec/rapporteur/preview-report" : "/api/reporting/report", {
           method: "PUT",
-          body: JSON.stringify({ sessionKey: report.sessionKey, content, expectedRevision: revision.current }),
+          body: JSON.stringify(assignmentId
+            ? { assignmentId, sessionKey: report.sessionKey, content, expectedRevision: revision.current }
+            : { sessionKey: report.sessionKey, content, expectedRevision: revision.current }),
         })
         revision.current = savedReport.revision
         dirty.current = false
       }
-      const result = await fetchJson("/api/reporting/report/submit", {
-        method: "POST",
-        body: JSON.stringify({ sessionKey: report.sessionKey }),
-      })
+      const result = assignmentId
+        ? await fetchJson("/api/rec/rapporteur/preview-report", {
+          method: "POST",
+          body: JSON.stringify({ assignmentId, sessionKey: report.sessionKey }),
+        })
+        : await fetchJson("/api/reporting/report/submit", {
+          method: "POST",
+          body: JSON.stringify({ sessionKey: report.sessionKey }),
+        })
       setReport(null)
       setContent(null)
       setComments([])
       setComment("")
       setSaved("")
       setNotice(result.notice ? "Sent to the approver for review. The approver could not be notified." : "Sent to the approver for review.")
-      setHome(await fetchJson("/api/reporting/sessions"))
+      setHome(assignmentId
+        ? await fetchJson(`/api/rec/rapporteur/dashboard?assignmentId=${encodeURIComponent(assignmentId)}`)
+        : await fetchJson("/api/reporting/sessions"))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -262,10 +272,16 @@ export default function ReportingPage() {
     event.preventDefault()
     setBusy(true)
     try {
-      const data = await fetchJson("/api/reporting/comments", {
-        method: "POST",
-        body: JSON.stringify({ sessionKey: report.sessionKey, message: comment }),
-      })
+      const assignmentId = previewAssignment.current
+      const data = assignmentId
+        ? await fetchJson("/api/rec/rapporteur/preview-report", {
+          method: "POST",
+          body: JSON.stringify({ action: "comment", assignmentId, sessionKey: report.sessionKey, message: comment }),
+        })
+        : await fetchJson("/api/reporting/comments", {
+          method: "POST",
+          body: JSON.stringify({ sessionKey: report.sessionKey, message: comment }),
+        })
       setComments(data.comments || [])
       setComment("")
     } catch (err) {
@@ -282,7 +298,7 @@ export default function ReportingPage() {
     setNotice("")
   }
 
-  const editable = !home?.preview && report && (report.status === "draft" || report.status === "returned")
+  const editable = Boolean(report && (report.status === "draft" || report.status === "returned"))
   const sessions = (home?.sessions || [])
     .slice()
     .sort((left, right) => (Number(left.sortAt) - Number(right.sortAt)) || String(left.title || "").localeCompare(String(right.title || "")))
@@ -295,7 +311,6 @@ export default function ReportingPage() {
   const severalHalls = (home?.halls || []).length > 1
   const nextKey = sessions.find((session) => !session.status || session.status === "new" || session.status === "draft" || session.status === "returned")?.sessionKey
   const rowAction = (session) => {
-    if (home?.preview) return "Open"
     if (session.status === "draft" || session.status === "returned") return "Continue"
     if (session.status === "submitted" || session.status === "approved") return "Read"
     return "Write"
@@ -423,9 +438,9 @@ export default function ReportingPage() {
         <div className="rec-desk-write">
         <article className="rec-desk-editor">
           <button type="button" className="plain" onClick={() => setReport(null)}>Sessions</button>
-          {!home?.preview && report.status === "submitted" ? <p className="rec-desk-state">With the approver for review.</p> : null}
-          {!home?.preview && report.status === "returned" ? <p className="rec-desk-state is-returned">The approver returned this report. Update it, then send it again.</p> : null}
-          {!home?.preview && report.status === "approved" ? <p className="rec-desk-state is-approved">Approved.</p> : null}
+          {report.status === "submitted" ? <p className="rec-desk-state">With the approver for review.</p> : null}
+          {report.status === "returned" ? <p className="rec-desk-state is-returned">The approver returned this report. Update it, then send it again.</p> : null}
+          {report.status === "approved" ? <p className="rec-desk-state is-approved">Approved.</p> : null}
           <EngageWordDocument
             key={report.sessionKey}
             editable={editable}
@@ -453,7 +468,7 @@ export default function ReportingPage() {
             {editable ? <button type="button" className="gold" disabled={busy || !reportContentReady(content)} onClick={submitReport}>Send to approver</button> : null}
           </div>
         </article>
-        {!home?.preview && report.status !== "draft" && report.status !== "new" ? (
+        {report.status !== "draft" && report.status !== "new" ? (
           <aside className="rec-desk-notes">
             <h2>Notes</h2>
             {comments.length ? comments.map((item) => (
