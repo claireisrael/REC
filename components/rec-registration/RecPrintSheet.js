@@ -37,7 +37,7 @@ export default function RecPrintSheet() {
   const queryIds = params.get("ids") || ""
   const backHref = `/dashboard/rec-conference/admin/scanning/badges${conferenceId ? `?conferenceId=${encodeURIComponent(conferenceId)}` : ""}`
   const [cards, setCards] = useState([])
-  const [skipped, setSkipped] = useState(0)
+  const [skipped, setSkipped] = useState({ notIssued: 0, unrecoverable: 0 })
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
   const [preparing, setPreparing] = useState("")
@@ -50,7 +50,7 @@ export default function RecPrintSheet() {
       setLoading(true)
       setError("")
       setCards([])
-      setSkipped(0)
+      setSkipped({ notIssued: 0, unrecoverable: 0 })
       setReadyCount(0)
       const idList = Array.from(new Set(readRequestedIds(conferenceId, queryIds)))
       setRequestedCount(idList.length)
@@ -60,7 +60,8 @@ export default function RecPrintSheet() {
         return
       }
       const nextCards = []
-      let nextSkipped = 0
+      let nextNotIssued = 0
+      let nextUnrecoverable = 0
       try {
         for (let index = 0; index < idList.length; index += REQUEST_SIZE) {
           const registrationIds = idList.slice(index, index + REQUEST_SIZE)
@@ -74,9 +75,10 @@ export default function RecPrintSheet() {
           if (!response.ok) throw new Error(payload.error || "These cards could not be opened.")
           if (cancelled) return
           nextCards.push(...(Array.isArray(payload.cards) ? payload.cards : []))
-          nextSkipped += Number(payload.skipped) || 0
+          nextNotIssued += Number(payload.notIssued) || 0
+          nextUnrecoverable += Number(payload.unrecoverable) || 0
           setCards(nextCards.slice())
-          setSkipped(nextSkipped)
+          setSkipped({ notIssued: nextNotIssued, unrecoverable: nextUnrecoverable })
           setReadyCount(nextCards.length)
         }
       } catch (err) {
@@ -143,9 +145,14 @@ export default function RecPrintSheet() {
         <div>
           <Link href={backHref}>← Badge list</Link>
           <strong>{countLabel}</strong>
-          {skipped > 0 && (
+          {skipped.notIssued > 0 && (
             <p>
-              {skipped} selected {skipped === 1 ? "person has" : "people have"} an active badge, but the card link is missing.
+              {skipped.notIssued} selected {skipped.notIssued === 1 ? "person does" : "people do"} not have a badge yet, so there is no card to print.
+            </p>
+          )}
+          {skipped.unrecoverable > 0 && (
+            <p>
+              {skipped.unrecoverable} selected {skipped.unrecoverable === 1 ? "person has" : "people have"} an active badge, but the card link is missing.
               Revoke that badge, then generate a replacement.
             </p>
           )}
@@ -164,7 +171,11 @@ export default function RecPrintSheet() {
       {loading && cards.length === 0 && <p className="rec-print-sheet-status">Preparing the cards…</p>}
 
       {!loading && !error && cards.length === 0 && (
-        <p className="rec-print-sheet-status">No cards to print. Revoke the active badge, generate a replacement, then open this page again.</p>
+        <p className="rec-print-sheet-status">
+          {skipped.unrecoverable > 0 && skipped.notIssued === 0
+            ? "No cards to print. Revoke the active badge, generate a replacement, then open this page again."
+            : "No cards to print. The selected people have not been issued a badge."}
+        </p>
       )}
 
       <div className="rec-print-sheet-pages">

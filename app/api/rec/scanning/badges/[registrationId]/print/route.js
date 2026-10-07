@@ -11,18 +11,20 @@ export async function GET(request, { params }) {
   try {
     const { registrationId } = await params
     const query = new URL(request.url).searchParams
-    const { cards } = await loadRecBadgePrintCards({
+    const result = await loadRecBadgePrintCards({
       conferenceId: query.get("conferenceId") || "",
       registrationIds: registrationId,
     })
-    if (!cards[0]) {
+    if (!result.cards[0]) {
       throw new RecScanningError(
-        "This active badge cannot be printed because its card link is missing. Revoke it, then generate a replacement.",
+        result.unrecoverable
+          ? "This active badge cannot be printed because its card link is missing. Revoke it, then generate a replacement."
+          : "This person does not have a badge yet, so there is no card to print.",
         409,
-        "badge_token_unrecoverable",
+        result.unrecoverable ? "badge_token_unrecoverable" : "badge_not_issued",
       )
     }
-    return await badgePrintResponse(cards[0], query)
+    return await badgePrintResponse(result.cards[0], query)
   } catch (error) {
     return badgePrintErrorResponse(error, "Badge could not be rendered")
   }

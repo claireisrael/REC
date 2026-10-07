@@ -33,6 +33,8 @@ import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
 import { getRecBadgeViewPath, REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
+import RecBadgeExports from "@/components/rec-registration/RecBadgeExports"
+import RecExhibitorReadiness from "@/components/rec-registration/RecExhibitorReadiness"
 
 const eventTypes = [
   { value: "conference_entry", label: "Conference Entrance" },
@@ -384,6 +386,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   })
   const [badgePage, setBadgePage] = useState(1)
   const [badgeLimit, setBadgeLimit] = useState(25)
+  const [badgeView, setBadgeView] = useState("registry")
   const [badgeStatus, setBadgeStatus] = useState("all")
   const [badgeSearchInput, setBadgeSearchInput] = useState("")
   const [badgeSearch, setBadgeSearch] = useState("")
@@ -1000,7 +1003,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setSuccess("")
     try {
       const issuedResults = []
-      for (let index = 0; index < registrationIds.length; index += 100) {
+      const chunkSize = sendEmail ? 2 : 100
+      for (let index = 0; index < registrationIds.length; index += chunkSize) {
         const chunk = registrationIds.slice(index, index + 100)
         if (sendEmail && registrationIds.length > 1) {
           setSuccess(`Sending badge emails… ${index} of ${registrationIds.length}`)
@@ -1084,8 +1088,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const releaseUnregisteredCodes = async () => {
     const count = Number.parseInt(unregisteredCount, 10)
     if (!conferenceId) return
-    if (!Number.isFinite(count) || count < 1 || count > 50) {
-      setModalError("Release between 1 and 50 codes at a time.")
+    if (!Number.isFinite(count) || count < 1) {
+      setModalError("Enter at least 1 delegate code.")
       return
     }
     setSaving("unregistered")
@@ -1108,11 +1112,63 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       window.open(`/rec-print?conferenceId=${encodeURIComponent(conferenceId)}`, "_blank", "noopener,noreferrer")
       setUnregisteredOpen(false)
       setSuccess(result.failed
-        ? `Released ${ids.length} unregistered QR codes. ${result.failed} could not be released. The print sheet is open.`
-        : `Released ${ids.length} unregistered QR codes. The print sheet is open.`)
+        ? `Released ${ids.length} delegate QR codes. ${result.failed} could not be released. The print sheet is open.`
+        : `Released ${ids.length} delegate QR codes. The print sheet is open.`)
       if (result.error) setError(result.error)
     } catch (err) {
-      setModalError(err.message || "Could not release unregistered QR codes.")
+      setModalError(err.message || "Could not release delegate QR codes.")
+    } finally {
+      setSaving("")
+    }
+  }
+
+  const printAllBadges = async () => {
+    if (!conferenceId) return
+    setSaving("badge-print-all")
+    setError("")
+    try {
+      const ids = Array.from(await loadMatchingBadgeIds("with_badge"))
+      if (!ids.length) {
+        setError("No active badges to print.")
+        return
+      }
+      localStorage.setItem("rec-print-batch", JSON.stringify({ conferenceId, ids }))
+      window.open(`/rec-print?conferenceId=${encodeURIComponent(conferenceId)}`, "_blank", "noopener,noreferrer")
+      setSuccess(`Print sheet opened for ${ids.length} badge${ids.length === 1 ? "" : "s"}.`)
+    } catch (err) {
+      setError(err.message || "Could not open every badge for printing.")
+    } finally {
+      setSaving("")
+    }
+  }
+
+  const generateNotIssuedBadges = async () => {
+    if (!conferenceId) return
+    setSaving("badge-generate-all")
+    setError("")
+    try {
+      const ids = Array.from(await loadMatchingBadgeIds("without_badge"))
+      if (!ids.length) {
+        setError("No one is waiting for a badge.")
+        return
+      }
+      setConfirmDialog({
+        title: "Generate badges",
+        confirmLabel: `Generate ${ids.length}`,
+        busyKey: "badges",
+        body: (
+          <p>
+            This creates a badge for {ids.length} {ids.length === 1 ? "person" : "people"} who have not been issued one and emails each person a digital copy to use if their physical badge is lost.
+            They move to Active. People who already have a badge are left as they are.
+          </p>
+        ),
+        onConfirm: async () => {
+          await issueBadges(ids, { sendEmail: true, scope: "any" })
+          setConfirmDialog(null)
+        },
+      })
+    } catch (err) {
+      setError(err.message || "Could not load the people who need a badge.")
     } finally {
       setSaving("")
     }
@@ -1122,7 +1178,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     const ids = selectedBadgeRegistrations.filter(Boolean)
     if (!conferenceId || ids.length === 0) return
     if (badgeStatus === "unregistered") {
-      setError("Unregistered codes are printed. They are not emailed.")
+      setError("Delegate codes are printed. They are not emailed.")
       return
     }
     setConfirmDialog({
@@ -1220,12 +1276,12 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   }
 
   const revokeBadge = (row) => {
-    if (!row?.badge?.$id || !conferenceId) return
+    if (!conferenceId || !row?.registration?.$id) return
     const registrantName = row.registration?.name || row.registration?.email || "this registrant"
     setConfirmDialog({
       title: "Revoke badge",
       confirmLabel: "Revoke badge",
-      busyKey: row.badge.$id,
+      busyKey: row.registration.$id,
       body: (
         <>
           <p>
@@ -1242,7 +1298,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   }
 
   const performRevokeBadge = async (row) => {
-    setSaving(row.badge.$id)
+    setSaving(row.registration.$id)
     setError("")
     setSuccess("")
     try {
@@ -1252,7 +1308,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         body: JSON.stringify({
           conferenceId,
           registrationId: row.registration?.$id,
-          tokenId: row.badge.$id,
+          tokenId: row.badge?.tokenId || "",
+          registryId: row.badge?.registryId || "",
           reason: "Revoked from scanner badge registry",
         }),
       })
@@ -1694,89 +1751,158 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     disabled={!conferenceId || saving === "unregistered"}
                   >
                     <FontAwesomeIcon icon={faQrcode} />
-                    Unregistered codes
+                    Delegate codes
                   </button>
                   <Link href={newRegistrationHref} className="rec-btn rec-btn-primary">
                     <FontAwesomeIcon icon={faPlus} />
                     New Registration
                   </Link>
-                  <button
-                    type="button"
-                    className="rec-btn rec-btn-outline"
-                    onClick={generateSelectedPrintCopies}
-                    disabled={saving === "badges" || saving === "badge-print-preview" || selectedBadgeRegistrations.length === 0}
-                  >
-                    {saving === "badge-print-preview" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faPrint} />}
-                    Print copies
-                  </button>
-                  <button
-                    type="button"
-                    className="rec-btn rec-btn-outline"
-                    onClick={reissueSelectedRevoked}
-                    disabled={saving === "badges" || saving === "badge-revoked-preview" || selectedBadgeRegistrations.length === 0}
-                  >
-                    {saving === "badge-revoked-preview" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faRefresh} />}
-                    Reissue revoked
-                  </button>
-                  <button
-                    type="button"
-                    className="rec-btn rec-btn-outline"
-                    onClick={selectAllMatchingBadges}
-                    disabled={saving === "badges" || saving === "badge-select-all" || !(badgeRegistry.total > 0)}
-                  >
-                    {saving === "badge-select-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faSquareCheck} />}
-                    {badgeRegistry.total > 0 && selectedBadgeRegistrations.length === badgeRegistry.total
-                      ? "Clear selection"
-                      : `Select all (${badgeRegistry.total || 0})`}
-                  </button>
-                  <button
-                    type="button"
-                    className="rec-btn rec-btn-outline"
-                    onClick={() => {
-                      if (!conferenceId || selectedBadgeRegistrations.length === 0) return
-                      const ids = selectedBadgeRegistrations.filter(Boolean)
-                      localStorage.setItem("rec-print-batch", JSON.stringify({ conferenceId, ids }))
-                      const url = `/rec-print?conferenceId=${encodeURIComponent(conferenceId)}`
-                      window.open(url, "_blank", "noopener,noreferrer")
-                    }}
-                    disabled={selectedBadgeRegistrations.length === 0}
-                  >
-                    <FontAwesomeIcon icon={faPrint} />
-                    Print page ({selectedBadgeRegistrations.length})
-                  </button>
-                  <button
-                    type="button"
-                    className="rec-btn rec-btn-primary"
-                    onClick={emailSelectedBadges}
-                    disabled={saving === "badges" || selectedBadgeRegistrations.length === 0}
-                  >
-                    {saving === "badges" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faEnvelope} />}
-                    Email selected ({selectedBadgeRegistrations.length})
-                  </button>
                 </div>
               </div>
+
+              <div className="rec-badge-tabs" role="tablist" aria-label="Badge workspace">
+                {[
+                  ["registry", "Eligible registrants"],
+                  ["exhibitors", "Exhibitor readiness"],
+                  ["exports", "Print / export badges"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={badgeView === key}
+                    className={`rec-badge-tab ${badgeView === key ? "active" : ""}`}
+                    onClick={() => setBadgeView(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {badgeView === "registry" && (
+                <div className="rec-badge-actionbar">
+                  <div className="rec-badge-action-group">
+                    <span className="rec-badge-action-label">All registrants</span>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-primary"
+                      onClick={generateNotIssuedBadges}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-generate-all" || !(badgeRegistry.counts?.withoutBadge > 0)}
+                    >
+                      {saving === "badge-generate-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faQrcode} />}
+                      Generate not issued ({badgeRegistry.counts?.withoutBadge || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={printAllBadges}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-print-all" || !(badgeRegistry.counts?.withBadge > 0)}
+                    >
+                      {saving === "badge-print-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faPrint} />}
+                      Print all badges ({badgeRegistry.counts?.withBadge || 0})
+                    </button>
+                  </div>
+                  <div className="rec-badge-action-group">
+                    <span className="rec-badge-action-label">Selected ({selectedBadgeRegistrations.length})</span>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={selectAllMatchingBadges}
+                      disabled={saving === "badges" || saving === "badge-select-all" || !(badgeRegistry.total > 0)}
+                    >
+                      {saving === "badge-select-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faSquareCheck} />}
+                      {badgeRegistry.total > 0 && selectedBadgeRegistrations.length === badgeRegistry.total
+                        ? "Clear selection"
+                        : `Select all (${badgeRegistry.total || 0})`}
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={emailSelectedBadges}
+                      disabled={saving === "badges" || selectedBadgeRegistrations.length === 0}
+                    >
+                      {saving === "badges" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faEnvelope} />}
+                      Email
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={() => {
+                        if (!conferenceId || selectedBadgeRegistrations.length === 0) return
+                        const ids = selectedBadgeRegistrations.filter(Boolean)
+                        localStorage.setItem("rec-print-batch", JSON.stringify({ conferenceId, ids }))
+                        const url = `/rec-print?conferenceId=${encodeURIComponent(conferenceId)}`
+                        window.open(url, "_blank", "noopener,noreferrer")
+                      }}
+                      disabled={selectedBadgeRegistrations.length === 0}
+                    >
+                      <FontAwesomeIcon icon={faPrint} />
+                      Print
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={generateSelectedPrintCopies}
+                      disabled={saving === "badges" || saving === "badge-print-preview" || selectedBadgeRegistrations.length === 0}
+                    >
+                      {saving === "badge-print-preview" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faQrcode} />}
+                      Print copies
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={reissueSelectedRevoked}
+                      disabled={saving === "badges" || saving === "badge-revoked-preview" || selectedBadgeRegistrations.length === 0}
+                    >
+                      {saving === "badge-revoked-preview" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faRefresh} />}
+                      Reissue revoked
+                    </button>
+                  </div>
+                </div>
+              )}
+              {badgeView === "exhibitors" && (
+                <div className="rec-panel-body">
+                  <RecExhibitorReadiness conferenceId={conferenceId} />
+                </div>
+              )}
+              {badgeView === "exports" && (
+                <div className="rec-panel-body">
+                  <RecBadgeExports
+                    key={conferenceId}
+                    conferenceId={conferenceId}
+                    days={Array.isArray(dayOptions) ? dayOptions : []}
+                    selectedIds={selectedBadgeRegistrations.filter(Boolean)}
+                    initialSearch={badgeSearch}
+                  />
+                </div>
+              )}
+              {badgeView === "registry" && (
               <div className="rec-panel-body">
-                <div className="rec-badge-stats">
-                  <div className="rec-stat-tile">
-                    <span className="rec-stat-number">{badgeRegistry.counts?.total || 0}</span>
-                    <span className="rec-stat-label">Registered</span>
-                  </div>
-                  <div className="rec-stat-tile">
-                    <span className="rec-stat-number">{badgeRegistry.counts?.withBadge || 0}</span>
-                    <span className="rec-stat-label">With QR badge</span>
-                  </div>
-                  <div className="rec-stat-tile">
-                    <span className="rec-stat-number">{badgeRegistry.counts?.withoutBadge || 0}</span>
-                    <span className="rec-stat-label">Without QR badge</span>
-                  </div>
-                  <div className="rec-stat-tile">
-                    <span className="rec-stat-number">{badgeRegistry.counts?.revoked || 0}</span>
-                    <span className="rec-stat-label">Revoked</span>
-                  </div>
-                  <div className="rec-stat-tile">
-                    <span className="rec-stat-number">{badgeRegistry.counts?.unregistered || 0}</span>
-                    <span className="rec-stat-label">Unregistered codes</span>
-                  </div>
+                <div className="rec-badge-stats" role="group" aria-label="Filter by badge status">
+                  {[
+                    ["all", "Registrants", badgeRegistry.counts?.total, "neutral"],
+                    ["without_badge", "Not issued", badgeRegistry.counts?.withoutBadge, "warning"],
+                    ["with_badge", "Active", badgeRegistry.counts?.withBadge, "success"],
+                    ["revoked", "Revoked", badgeRegistry.counts?.revoked, "danger"],
+                    ["expired", "Expired", badgeRegistry.counts?.expired, "muted"],
+                    ["unregistered", "Delegate codes", badgeRegistry.counts?.unregistered, "info"],
+                  ].map(([status, label, count, tone]) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className={`rec-stat-tile rec-badge-stat rec-badge-stat-${tone} ${badgeStatus === status ? "active" : ""}`}
+                      aria-pressed={badgeStatus === status}
+                      onClick={() => {
+                        if (badgeStatus === status) return
+                        setBadgeStatus(status)
+                        setBadgePage(1)
+                        setSelectedBadgeRegistrations([])
+                      }}
+                    >
+                      <span className="rec-stat-number">{count || 0}</span>
+                      <span className="rec-stat-label">{label}</span>
+                    </button>
+                  ))}
                 </div>
 
                 <div className="rec-registration-toolbar rec-badge-toolbar">
@@ -1792,11 +1918,12 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                         setSelectedBadgeRegistrations([])
                       }}
                     >
-                      <option value="without_badge">Without QR Badge</option>
-                      <option value="with_badge">With QR Badge</option>
+                      <option value="without_badge">Not issued</option>
+                      <option value="with_badge">Active</option>
                       <option value="revoked">Revoked</option>
-                      <option value="unregistered">Unregistered codes</option>
-                      <option value="all">All Registrants</option>
+                      <option value="expired">Expired</option>
+                      <option value="unregistered">Delegate codes</option>
+                      <option value="all">All badges</option>
                     </select>
                   </div>
                   <div className="rec-field">
@@ -1835,7 +1962,23 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                         onChange={(event) => setBadgeSearchInput(event.target.value)}
                         placeholder="Name, email, organization..."
                       />
-                      <button type="submit" className="rec-btn rec-btn-outline">Search</button>
+                      {(badgeSearch || badgeSearchInput) && (
+                        <button
+                          type="button"
+                          className="rec-btn rec-btn-outline"
+                          onClick={() => {
+                            setBadgeSearchInput("")
+                            if (badgeSearch) {
+                              setBadgeSearch("")
+                              setBadgePage(1)
+                              setSelectedBadgeRegistrations([])
+                            }
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                      <button type="submit" className="rec-btn rec-btn-primary">Search</button>
                     </div>
                   </form>
                 </div>
@@ -1848,7 +1991,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                         <FontAwesomeIcon icon={faLink} />
                         Open new badge
                       </a>
-                    ) : !badgeAction.isError ? " If this registrant moved out of the current filter, choose All Registrants or With QR Badge to find Open." : null}
+                    ) : !badgeAction.isError ? " This registrant moved out of the current filter. Choose Active or Registrants above to find them." : null}
                   </div>
                 )}
 
@@ -1922,15 +2065,17 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                                 {registration.organization && <div className="rec-row-desc">{registration.organization}</div>}
                               </td>
                               <td data-label="Type">
-                                <span className="rec-chip">{registration.registrationType || "Unknown"}</span>
+                                <span className="rec-chip">{registration.registrationType === "Unregistered" ? "Delegate" : (registration.registrationType || "Unknown")}</span>
                               </td>
                               <td data-label="Badge">
-                                {badge?.isActive ? (
+                                {row.registryStatus === "active" || (!row.registryStatus && badge?.isActive) ? (
                                   <span className="rec-status rec-status-published">Active</span>
-                                ) : badge?.revokedAt ? (
+                                ) : row.registryStatus === "revoked" || (!row.registryStatus && badge?.revokedAt) ? (
                                   <span className="rec-status rec-status-archived">Revoked</span>
+                                ) : row.registryStatus === "expired" ? (
+                                  <span className="rec-status rec-status-draft">Expired</span>
                                 ) : (
-                                  <span className="rec-status rec-status-draft">Not generated</span>
+                                  <span className="rec-status rec-status-draft">{row.registryStatus === "not_issued" ? "Not issued" : "Not generated"}</span>
                                 )}
                                 {badge?.issuedAt && (
                                   <div className="rec-row-desc mt-1">Issued {formatDate(badge.issuedAt)}</div>
@@ -1986,9 +2131,9 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                                       type="button"
                                       className="rec-btn rec-btn-accent rec-btn-sm"
                                       onClick={() => revokeBadge(row)}
-                                      disabled={saving === "badges" || saving === badge.$id}
+                                      disabled={saving === "badges" || saving === registration.$id}
                                     >
-                                      {saving === badge.$id ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faBan} />}
+                                      {saving === registration.$id ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faBan} />}
                                       Revoke
                                     </button>
                                   )}
@@ -2016,7 +2161,9 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
 
                 <div className="rec-pagination-bar">
                   <span className="rec-muted">
-                    Showing page {badgeRegistry.page || badgePage} of {badgeRegistry.totalPages || 1} · {badgeRegistry.total || 0} matched
+                    {(badgeRegistry.total || 0) === 0
+                      ? "No matching registrants"
+                      : `Showing ${((badgeRegistry.page || badgePage) - 1) * badgeLimit + 1}–${Math.min((badgeRegistry.page || badgePage) * badgeLimit, badgeRegistry.total)} of ${badgeRegistry.total} · Page ${badgeRegistry.page || badgePage} of ${badgeRegistry.totalPages || 1}`}
                   </span>
                   <div className="rec-page-actions">
                     <button
@@ -2044,6 +2191,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   </div>
                 </div>
               </div>
+              )}
             </section>
           )}
 
@@ -2577,7 +2725,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       {unregisteredOpen && (
         <ScannerManagementModal
           modalId="unregistered-codes"
-          title="Unregistered QR codes"
+          title="Delegate QR codes"
           busy={saving === "unregistered"}
           onClose={() => {
             if (saving === "unregistered") return
@@ -2605,7 +2753,6 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             </>
           )}
         >
-          <p className="rec-muted">These codes are for people attending without a registration. A scan records the badge number as Unregistered. They stay off the registration list, and no email is sent.</p>
           <div className="rec-field">
             <label className="rec-label" htmlFor="unregistered-count">How many codes</label>
             <input
@@ -2613,7 +2760,6 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
               className="rec-input"
               type="number"
               min="1"
-              max="50"
               value={unregisteredCount}
               onChange={(event) => setUnregisteredCount(event.target.value)}
             />

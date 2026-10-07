@@ -9,6 +9,7 @@ import { validateEmail } from "@/lib/utils/validation"
 import { formatAppwriteDate } from "@/lib/utils"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import { formatRecParticipantCategory, formatRecParticipantCategoryTag, normalizeRecOptionalSessions } from "@/lib/rec-conference/registration-tracks.mjs"
+import { REC_BADGE_ROLES, resolveRecBadgeRole } from "@/lib/rec-conference/rec-badge-display.mjs"
 import RecOptionalSessionsFields from "@/components/rec-registration/RecOptionalSessionsFields"
 import RecRegistrationStepper, {
   REC_REGISTRATION_STEPS,
@@ -39,6 +40,7 @@ const emptyFormData = {
   stateRegion: "",
   country: "",
   registrationType: "Attendee",
+  badgeRole: "",
   daysAttending: [],
   visaLetterRequired: false,
   passportNumber: "",
@@ -67,6 +69,7 @@ const buildFormData = (source = {}, { includeSponsorship = true } = {}) => ({
   stateRegion: source.stateRegion || "",
   country: source.country || "",
   registrationType: source.registrationType || "Attendee",
+  badgeRole: source.badgeRole || "",
   daysAttending: Array.isArray(source.daysAttending) ? source.daysAttending : [],
   visaLetterRequired: source.visaLetterRequired === true,
   passportNumber: source.passportNumber || "",
@@ -240,8 +243,12 @@ export default function AdminRegistrationForm({
       return
     }
 
+    // badgeRole is only sent once it has been set, so saves keep working on a
+    // database that does not have the badgeRole attribute yet.
+    const { badgeRole, ...details } = formData
     onSubmit({
-      ...formData,
+      ...details,
+      ...(badgeRole || initialData?.badgeRole ? { badgeRole: badgeRole || null } : {}),
       eventStart,
       eventEnd
     }, {
@@ -469,6 +476,15 @@ export default function AdminRegistrationForm({
                   </Form.Select>
                 </Form.Group>
               </Col>
+              <Col md={4}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Badge role</Form.Label>
+                  <Form.Select value={formData.badgeRole || ""} onChange={(e) => handleInputChange("badgeRole", e.target.value)}>
+                    <option value="">Automatic ({resolveRecBadgeRole({ registrationType: formData.registrationType })})</option>
+                    {REC_BADGE_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                  </Form.Select>
+                </Form.Group>
+              </Col>
             </Row>
 
             {formData.registrationType === "Exhibitor" && (
@@ -561,6 +577,7 @@ export default function AdminRegistrationForm({
                 { label: "Sector", value: formData.sector.join(", ") },
                 { label: "Location", value: location },
                 { label: "Registration type", value: formData.registrationType },
+                { label: "Badge role", value: resolveRecBadgeRole(formData) },
                 { label: "Days attending", value: formData.daysAttending.join(", ") },
                 { label: "Participant category", value: formatRecParticipantCategory(formData.additionalSessions, conference?.year) },
                 { label: "Tag", value: formatRecParticipantCategoryTag(formData.additionalSessions, conference?.year) },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { PDFDocument } from "pdf-lib"
-import { addA3BadgePages, renderBadge } from "@/lib/rec-conference/badge-renderer.mjs"
+import { A3_CARDS_PER_SHEET, addA3BadgePages, renderBadge } from "@/lib/rec-conference/badge-renderer.mjs"
 import { loadRecBadgePrintCards } from "@/lib/rec-conference/scanning-server"
 import { recScanningErrorResponse, requireRecScanningAdmin } from "@/lib/rec-conference/scanning-route"
 
@@ -55,7 +55,7 @@ export async function POST(request) {
         for (const card of result.cards) {
           pending.push(await renderBadge(card, { format: "png" }))
           rendered += 1
-          if (pending.length === 6) {
+          if (pending.length === A3_CARDS_PER_SHEET) {
             await addA3BadgePages(pdf, pending)
             pending = []
           }
