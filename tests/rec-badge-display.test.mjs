@@ -9,6 +9,7 @@ import {
   formatRecBadgeRoleLabel,
   formatRecBadgeTheme,
   formatRecBadgeVenue,
+  resolveRecBadgeRole,
 } from "../lib/rec-conference/rec-badge-display.mjs"
 
 test("badge names keep selected titles such as Ms. and Mr.", () => {
@@ -59,4 +60,14 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
   assert.equal(formatRecBadgeRoleLabel("Sponsor"), "Sponsor")
   assert.equal(formatRecBadgeRoleLabel(""), "")
   assert.equal(formatRecBadgeRoleLabel(null), "")
+})
+
+test("badge role uses the chosen role, otherwise follows the registration type", () => {
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Official" }), "Official")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "crew" }), "Crew")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee" }), "Delegate")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Sponsor" }), "Delegate")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Exhibitor" }), "Exhibitor")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Speaker" }), "Delegate")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Unregistered" }), "")
 })

@@ -51,3 +51,9 @@ test("renders the provided template as a PNG and a PDF", async () => {
   assert.equal(Math.round(page.getWidth() * mm), 297)
   assert.equal(Math.round(page.getHeight() * mm), 420)
 })
+
+test("an A3 portrait sheet holds nine cards", async () => {
+  const png = await renderBadge(sampleBadge, { format: "png" })
+  const ten = await PDFDocument.load(await renderA3BadgePdf(Array(10).fill(png)))
+  assert.equal(ten.getPageCount(), 2)
+})
