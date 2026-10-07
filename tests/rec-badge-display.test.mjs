@@ -9,6 +9,8 @@ import {
   formatRecBadgeRoleLabel,
   formatRecBadgeTheme,
   formatRecBadgeVenue,
+  formatRecBadgeCardCopy,
+  formatRecWalkInBadgeName,
 } from "../lib/rec-conference/rec-badge-display.mjs"
 
 test("badge names keep selected titles such as Ms. and Mr.", () => {
@@ -55,6 +57,20 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
   // (used for scan eligibility, admin lists, exports) is untouched elsewhere.
   assert.equal(formatRecBadgeRoleLabel("Attendee"), "Delegate")
   assert.equal(formatRecBadgeRoleLabel("attendee"), "Delegate")
+  assert.equal(formatRecBadgeRoleLabel("Unregistered"), "Delegate")
+  assert.equal(formatRecWalkInBadgeName({ registrationType: "Unregistered", firstName: "Unregistered", lastName: "REC26-000008" }), "Delegate REC26-000008")
+  assert.deepEqual(
+    formatRecBadgeCardCopy({ registrationType: "Unregistered", name: "Delegate REC26-000008", organization: "Not registered" }),
+    { name: "Delegate", underName: "" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({ organization: "Non registered", name: "Unregistered REC26-000009" }),
+    { name: "Delegate", underName: "" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({ name: "Claire Namagala", organization: "NREP" }),
+    { name: "Claire Namagala", underName: "NREP" }
+  )
   assert.equal(formatRecBadgeRoleLabel("Exhibitor"), "Exhibitor")
   assert.equal(formatRecBadgeRoleLabel("Sponsor"), "Sponsor")
   assert.equal(formatRecBadgeRoleLabel(""), "")

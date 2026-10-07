@@ -1108,11 +1108,11 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       window.open(`/rec-print?conferenceId=${encodeURIComponent(conferenceId)}`, "_blank", "noopener,noreferrer")
       setUnregisteredOpen(false)
       setSuccess(result.failed
-        ? `Released ${ids.length} unregistered QR codes. ${result.failed} could not be released. The print sheet is open.`
-        : `Released ${ids.length} unregistered QR codes. The print sheet is open.`)
+        ? `Released ${ids.length} delegate QR codes. ${result.failed} could not be released. The print sheet is open.`
+        : `Released ${ids.length} delegate QR codes. The print sheet is open.`)
       if (result.error) setError(result.error)
     } catch (err) {
-      setModalError(err.message || "Could not release unregistered QR codes.")
+      setModalError(err.message || "Could not release delegate QR codes.")
     } finally {
       setSaving("")
     }
@@ -1122,7 +1122,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     const ids = selectedBadgeRegistrations.filter(Boolean)
     if (!conferenceId || ids.length === 0) return
     if (badgeStatus === "unregistered") {
-      setError("Unregistered codes are printed. They are not emailed.")
+      setError("Delegate codes are printed. They are not emailed.")
       return
     }
     setConfirmDialog({
@@ -1694,7 +1694,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     disabled={!conferenceId || saving === "unregistered"}
                   >
                     <FontAwesomeIcon icon={faQrcode} />
-                    Unregistered codes
+                    Delegate codes
                   </button>
                   <Link href={newRegistrationHref} className="rec-btn rec-btn-primary">
                     <FontAwesomeIcon icon={faPlus} />
@@ -1775,7 +1775,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   </div>
                   <div className="rec-stat-tile">
                     <span className="rec-stat-number">{badgeRegistry.counts?.unregistered || 0}</span>
-                    <span className="rec-stat-label">Unregistered codes</span>
+                    <span className="rec-stat-label">Delegate codes</span>
                   </div>
                 </div>
 
@@ -1795,7 +1795,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                       <option value="without_badge">Without QR Badge</option>
                       <option value="with_badge">With QR Badge</option>
                       <option value="revoked">Revoked</option>
-                      <option value="unregistered">Unregistered codes</option>
+                      <option value="unregistered">Delegate codes</option>
                       <option value="all">All Registrants</option>
                     </select>
                   </div>
@@ -1922,7 +1922,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                                 {registration.organization && <div className="rec-row-desc">{registration.organization}</div>}
                               </td>
                               <td data-label="Type">
-                                <span className="rec-chip">{registration.registrationType || "Unknown"}</span>
+                                <span className="rec-chip">{registration.registrationType === "Unregistered" ? "Delegate" : (registration.registrationType || "Unknown")}</span>
                               </td>
                               <td data-label="Badge">
                                 {badge?.isActive ? (
@@ -2577,7 +2577,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       {unregisteredOpen && (
         <ScannerManagementModal
           modalId="unregistered-codes"
-          title="Unregistered QR codes"
+          title="Delegate QR codes"
           busy={saving === "unregistered"}
           onClose={() => {
             if (saving === "unregistered") return
@@ -2605,7 +2605,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             </>
           )}
         >
-          <p className="rec-muted">These codes are for people attending without a registration. A scan records the badge number as Unregistered. They stay off the registration list, and no email is sent.</p>
+          <p className="rec-muted">These codes are for people attending without a registration. A scan records the badge number as Delegate. They stay off the registration list, and no email is sent.</p>
           <div className="rec-field">
             <label className="rec-label" htmlFor="unregistered-count">How many codes</label>
             <input

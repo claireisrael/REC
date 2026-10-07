@@ -88,6 +88,7 @@ function formatTime(value) {
 function humanize(value, fallback = "Not specified") {
   const normalized = String(value || "").trim()
   if (!normalized) return fallback
+  if (normalized.toLowerCase() === "unregistered") return "Delegate"
   return normalized
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
