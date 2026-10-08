@@ -1005,7 +1005,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       const issuedResults = []
       const chunkSize = sendEmail ? 2 : 100
       for (let index = 0; index < registrationIds.length; index += chunkSize) {
-        const chunk = registrationIds.slice(index, index + 100)
+        const chunk = registrationIds.slice(index, index + chunkSize)
         if (sendEmail && registrationIds.length > 1) {
           setSuccess(`Sending badge emails… ${index} of ${registrationIds.length}`)
         }
@@ -1169,6 +1169,38 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       })
     } catch (err) {
       setError(err.message || "Could not load the people who need a badge.")
+    } finally {
+      setSaving("")
+    }
+  }
+
+  const emailNotYetSentBadges = async () => {
+    if (!conferenceId) return
+    setSaving("badge-email-unsent")
+    setError("")
+    try {
+      const ids = Array.from(await loadMatchingBadgeIds("not_emailed"))
+      if (!ids.length) {
+        setError("Everyone with an active badge has been emailed their digital copy.")
+        return
+      }
+      setConfirmDialog({
+        title: "Email digital tags",
+        confirmLabel: `Email ${ids.length}`,
+        busyKey: "badges",
+        body: (
+          <>
+            <p>This emails a digital copy of their tag to {ids.length} {ids.length === 1 ? "person" : "people"} whose badge was generated without an email.</p>
+            <p>Their QR codes stay the same, so printed badges keep working. Keep this page open until sending finishes.</p>
+          </>
+        ),
+        onConfirm: async () => {
+          await issueBadges(ids, { sendEmail: true, scope: "resend" })
+          setConfirmDialog(null)
+        },
+      })
+    } catch (err) {
+      setError(err.message || "Could not load the people waiting for an email.")
     } finally {
       setSaving("")
     }
@@ -1791,6 +1823,15 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     >
                       {saving === "badge-generate-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faQrcode} />}
                       Generate not issued ({badgeRegistry.counts?.withoutBadge || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={emailNotYetSentBadges}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-email-unsent" || !(badgeRegistry.counts?.notEmailed > 0)}
+                    >
+                      {saving === "badge-email-unsent" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faEnvelope} />}
+                      Email not yet sent ({badgeRegistry.counts?.notEmailed || 0})
                     </button>
                     <button
                       type="button"
