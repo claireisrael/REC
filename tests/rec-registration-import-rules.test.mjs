@@ -291,7 +291,18 @@ test("badge title stays REC26 & Expo and the category sits under the QR as a tag
   )
   assert.equal(
     formatRecParticipantCategoryTag({ additionalSessions: ["business_forum"] }, 2026),
+    "#REC26 & Expo #UGEUBF"
+  )
+  assert.equal(
+    formatRecParticipantCategoryTag({ additionalSessions: ["business_forum", "business_forum_only"] }, 2026),
     "#UGEUBF"
+  )
+  assert.equal(formatRecParticipantCategory({ additionalSessions: ["business_forum_only"] }, 2026), "UG-EU BF only")
+  assert.deepEqual(normalizeRecOptionalSessions("UG-EU BF only"), ["business_forum", "business_forum_only"])
+  assert.deepEqual(normalizeRecOptionalSessions("#REC26 & Expo #UGEUBF"), ["business_forum"])
+  assert.equal(
+    getRecParticipantCategoryDirection({ additionalSessions: ["business_forum", "business_forum_only"] }),
+    "UG-EU Business Forum"
   )
   assert.equal(
     formatRecParticipantCategoryTag({ additionalSessions: ["business_forum", "marketplace"] }, 2026),
@@ -321,9 +332,10 @@ test("participant category copy tells people to choose where they will be", () =
   assert.equal(getRecOptionalSessionCopy().intro, "Choose where you will be.")
 })
 
-test("registrations can be filtered by the four participant categories", () => {
+test("registrations can be filtered by the five participant categories", () => {
   const recOnly = { additionalSessions: [] }
   const forum = { additionalSessions: ["business_forum"] }
+  const forumOnly = { additionalSessions: ["business_forum", "business_forum_only"] }
   const aemp = { additionalSessions: ["marketplace"] }
   const both = { additionalSessions: ["business_forum", "marketplace"] }
   const missing = { additionalSessions: null }
@@ -333,6 +345,8 @@ test("registrations can be filtered by the four participant categories", () => {
   assert.equal(registrationMatchesParticipantCategory(missing, "rec"), true)
   assert.equal(registrationMatchesParticipantCategory(forum, "ug_eu_bf"), true)
   assert.equal(registrationMatchesParticipantCategory(both, "ug_eu_bf"), false)
+  assert.equal(registrationMatchesParticipantCategory(forumOnly, "ug_eu_bf"), false)
+  assert.equal(registrationMatchesParticipantCategory(forumOnly, "ug_eu_bf_only"), true)
   assert.equal(registrationMatchesParticipantCategory(aemp, "aemp"), true)
   assert.equal(registrationMatchesParticipantCategory(both, "ug_eu_bf_aemp"), true)
   assert.equal(registrationMatchesParticipantCategory(forum, "ug_eu_bf_aemp"), false)
@@ -343,7 +357,9 @@ test("registrations can be filtered by the four participant categories", () => {
     notContains: [],
   })
   assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf").contains, ["business_forum"])
-  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf").notContains, ["marketplace"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf").notContains, ["marketplace", "business_forum_only"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf_only").contains, ["business_forum", "business_forum_only"])
+  assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf_only").notContains, ["marketplace"])
   assert.deepEqual(recParticipantCategoryQueryPlan("aemp").contains, ["marketplace"])
   assert.deepEqual(recParticipantCategoryQueryPlan("aemp").notContains, ["business_forum"])
   assert.deepEqual(recParticipantCategoryQueryPlan("ug_eu_bf_aemp").contains, ["business_forum", "marketplace"])
@@ -359,5 +375,6 @@ test("registrations can be filtered by the four participant categories", () => {
   assert.deepEqual(queries, [
     ["contains", "additionalSessions", "business_forum"],
     ["notContains", "additionalSessions", "marketplace"],
+    ["notContains", "additionalSessions", "business_forum_only"],
   ])
 })
