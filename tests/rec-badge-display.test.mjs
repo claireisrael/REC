@@ -11,6 +11,7 @@ import {
   formatRecBadgeVenue,
   formatDelegateSerial,
   formatRecBadgeCardCopy,
+  formatRecBadgeDayTag,
   formatRecWalkInBadgeName,
   readDelegateSerial,
   resolveRecBadgeRole,
@@ -74,6 +75,26 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
     formatRecBadgeCardCopy({ registrationType: "Unregistered", organization: "Not registered" }),
     { name: "Delegate", underName: "" }
   )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({
+      registrationType: "Unregistered",
+      organization: "D-121",
+      badgeRole: "press",
+      daysAttending: ["19th October – Day 1"],
+    }),
+    { name: "Press", underName: "D-121 · 19 OCT" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({
+      registrationType: "Unregistered",
+      organization: "D-002",
+      daysAttending: ["19th October – Day 1", "22nd October - Day 4"],
+    }),
+    { name: "Delegate", underName: "D-002" }
+  )
+  assert.equal(formatRecWalkInBadgeName({ registrationType: "Unregistered", badgeRole: "Press", lastName: "REC26-000009" }), "Press REC26-000009")
+  assert.equal(formatRecBadgeDayTag("22nd October - Day 4"), "22 OCT")
+  assert.equal(formatRecBadgeDayTag("Day 4"), "")
   assert.deepEqual(
     formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Claire Namagala", organization: "NREP" }),
     { name: "Claire Namagala", underName: "NREP" }

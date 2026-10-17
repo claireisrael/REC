@@ -32,6 +32,8 @@ import { useAppwrite } from "@/lib/appwrite/provider"
 import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
 import { getRecBadgeViewPath, REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import { REC_BADGE_ROLES } from "@/lib/rec-conference/rec-badge-display.mjs"
+import { recParticipantCategoryFilterOptions } from "@/lib/rec-conference/registration-tracks.mjs"
 import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
 import RecBadgeExports from "@/components/rec-registration/RecBadgeExports"
 import RecExhibitorReadiness from "@/components/rec-registration/RecExhibitorReadiness"
@@ -412,6 +414,9 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [unregisteredOpen, setUnregisteredOpen] = useState(false)
   const [unregisteredCount, setUnregisteredCount] = useState(10)
+  const [unregisteredDay, setUnregisteredDay] = useState("")
+  const [unregisteredCategory, setUnregisteredCategory] = useState("")
+  const [unregisteredRole, setUnregisteredRole] = useState("")
   const workspaceRequestId = useRef(0)
 
   const selectedConference = useMemo(
@@ -1098,7 +1103,13 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     try {
       const result = await fetchJson("/api/rec/scanning/badges/unregistered", {
         method: "POST",
-        body: JSON.stringify({ conferenceId, count }),
+        body: JSON.stringify({
+          conferenceId,
+          count,
+          day: unregisteredDay,
+          category: unregisteredCategory,
+          badgeRole: unregisteredRole,
+        }),
       })
       const released = Array.isArray(result.released) ? result.released : []
       const ids = released.map((item) => item.registrationId).filter(Boolean)
@@ -2833,6 +2844,47 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
               value={unregisteredCount}
               onChange={(event) => setUnregisteredCount(event.target.value)}
             />
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-day">Valid on</label>
+            <select
+              id="unregistered-day"
+              className="rec-select"
+              value={unregisteredDay}
+              onChange={(event) => setUnregisteredDay(event.target.value)}
+            >
+              <option value="">Every conference day</option>
+              {(Array.isArray(dayOptions) ? dayOptions : []).filter((day) => day?.label).map((day) => (
+                <option key={day.label} value={day.label}>{day.label} only</option>
+              ))}
+            </select>
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-category">Participant category</label>
+            <select
+              id="unregistered-category"
+              className="rec-select"
+              value={unregisteredCategory}
+              onChange={(event) => setUnregisteredCategory(event.target.value)}
+            >
+              {recParticipantCategoryFilterOptions(selectedConference?.year).map((option) => (
+                <option key={option.value} value={option.value === "rec" ? "" : option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-role">Printed as</label>
+            <select
+              id="unregistered-role"
+              className="rec-select"
+              value={unregisteredRole}
+              onChange={(event) => setUnregisteredRole(event.target.value)}
+            >
+              <option value="">Delegate</option>
+              {REC_BADGE_ROLES.filter((role) => role !== "Delegate").map((role) => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
           </div>
           {modalError && <div className="rec-alert rec-alert-danger" role="alert">{modalError}</div>}
         </ScannerManagementModal>

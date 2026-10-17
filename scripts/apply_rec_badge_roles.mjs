@@ -322,14 +322,20 @@ if (!APPLY) console.log("\nNothing was written. Run again with --apply to save t
 const previewArg = process.argv.find((arg) => arg.startsWith("--preview-pdf="))
 if (previewArg) {
   const out = path.resolve(previewArg.slice("--preview-pdf=".length))
-  const { renderBadge, combineBadgePdfs } = await import("../lib/rec-conference/badge-renderer.mjs")
+  const { renderBadge } = await import("../lib/rec-conference/badge-renderer.mjs")
   const { resolveRecBadgeRole } = await import("../lib/rec-conference/rec-badge-display.mjs")
   const { getRecRegistrantName } = await import("../lib/rec-conference/scanning-analytics.mjs")
   const { formatRecParticipantCategoryTag } = await import("../lib/rec-conference/registration-tracks.mjs")
-  const pages = []
+  const { PDFDocument } = await import("pdf-lib")
+  const sharp = (await import("sharp")).default
+  // Full-resolution print PNGs make a multi-gigabyte file, so the preview
+  // embeds screen-resolution JPEGs on 93 x 125 mm pages.
+  const pt = 72 / 25.4
+  const pdf = await PDFDocument.create()
+  let count = 0
   for (const { registration } of results) {
     if (!registration?.$id) continue
-    pages.push(await renderBadge({
+    const png = await renderBadge({
       registration: {
         ...registration,
         name: getRecRegistrantName(registration),
@@ -338,8 +344,12 @@ if (previewArg) {
       },
       badge: { badgeNumberLabel: "" },
       qrPayload: "NREP-PREVIEW-NOT-A-VALID-BADGE",
-    }, { format: "pdf" }))
+    }, { format: "png" })
+    const jpg = await sharp(png).resize({ width: 900 }).jpeg({ quality: 80 }).toBuffer()
+    const page = pdf.addPage([93 * pt, 125 * pt])
+    page.drawImage(await pdf.embedJpg(jpg), { x: 0, y: 0, width: 93 * pt, height: 125 * pt })
+    count += 1
   }
-  await fs.writeFile(out, await combineBadgePdfs(pages))
-  console.log(`\nPreview PDF: ${pages.length} badges written to ${out}`)
+  await fs.writeFile(out, await pdf.save())
+  console.log(`\nPreview PDF: ${count} badges written to ${out}`)
 }
