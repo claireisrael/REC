@@ -17,3 +17,6 @@ public/badge/rec26-paper.jpg
 public/badge/rec26-footer.jpg
 public/badge/rec26-ministry.png
 
+
+# Attendee lists fed to scripts/apply_rec_badge_roles.mjs. They hold contact details.
+scripts/data/
