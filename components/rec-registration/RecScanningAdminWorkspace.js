@@ -34,6 +34,7 @@ import {
   getRecBadgeViewPath,
   REC_SCANNER_RESTRICTION_VENUES,
   REC_TERA_HW0009_DEPLOYMENTS,
+  venueMatchesAllowedList,
 } from "@/lib/rec-conference/scanning-rules.mjs"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import { REC_BADGE_ROLES } from "@/lib/rec-conference/rec-badge-display.mjs"
@@ -146,6 +147,14 @@ function formatDate(value) {
     timeStyle: "short",
     timeZone: "Africa/Kampala",
   })
+}
+
+// "14:00" in Kampala time, or "" without a time.
+function formatTime(value) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Kampala" })
 }
 
 function formatList(values, fallback = "None") {
@@ -450,6 +459,32 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     ].filter(Boolean))),
     [operatorForm.allowedVenues]
   )
+  // Halls that have scan events, for people scanning sessions in a hall.
+  const hallVenueOptions = useMemo(
+    () => Array.from(new Set(events.map((event) => String(event.venue || "").trim()).filter(Boolean)))
+      .filter((venue) => !venueOptions.includes(venue))
+      .sort((left, right) => left.localeCompare(right)),
+    [events, venueOptions]
+  )
+  const [showAllOperatorEvents, setShowAllOperatorEvents] = useState(false)
+  // With a venue chosen, the form lists that venue's events by day; events
+  // already ticked elsewhere stay visible so nothing is unticked unseen.
+  const operatorEventGroups = useMemo(() => {
+    const venue = operatorForm.allowedVenues?.[0] || ""
+    const chosen = new Set(operatorForm.allowedEventIds || [])
+    const inVenue = (event) => !venue || (event.venue && venueMatchesAllowedList(event.venue, [venue]))
+    const visible = events
+      .filter((event) => showAllOperatorEvents || inVenue(event) || chosen.has(event.$id))
+      .sort((left, right) => (Number(left.day || 99) - Number(right.day || 99))
+        || String(left.startTime || "").localeCompare(String(right.startTime || ""))
+        || String(left.name || "").localeCompare(String(right.name || "")))
+    const groups = new Map()
+    for (const event of visible) {
+      const key = event.day ? `Day ${event.day}${event.date ? ` · ${event.date}` : ""}` : "Any day"
+      groups.set(key, [...(groups.get(key) || []), { event, outsideVenue: !inVenue(event) }])
+    }
+    return Array.from(groups.entries())
+  }, [events, operatorForm.allowedEventIds, operatorForm.allowedVenues, showAllOperatorEvents])
   const visibleEventIds = useMemo(() => events.map((event) => event.$id).filter(Boolean), [events])
   const allVisibleEventsSelected = visibleEventIds.length > 0
     && visibleEventIds.every((eventId) => selectedEventIds.includes(eventId))
@@ -507,11 +542,22 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       limit: String(operatorLimit),
     })
     const shouldLoadEvents = activeView === "events" || activeView === "operators"
+    // The operator form lists every session, so load all pages there.
+    const loadAllEvents = async () => {
+      const first = await fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+      const documents = [...(first.documents || [])]
+      for (let page = 2; page <= (first.totalPages || 1); page += 1) {
+        eventParams.set("page", String(page))
+        const next = await fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+        documents.push(...(next.documents || []))
+      }
+      return { ...first, documents }
+    }
     let eventData, operatorData, badgeData
     try {
       [eventData, operatorData, badgeData] = await Promise.all([
         shouldLoadEvents
-          ? fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+          ? (activeView === "operators" ? loadAllEvents() : fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`))
           : Promise.resolve({ documents: [], total: 0, page: 1, limit: eventLimit, totalPages: 1 }),
         activeView === "operators"
           ? fetchJson(`/api/rec/scanning/operators?${operatorParams.toString()}`)
@@ -844,6 +890,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setOperatorForm(emptyOperatorForm)
     setModalError("")
     setSuccess("")
+    setShowAllOperatorEvents(false)
     setOperatorModalOpen(true)
   }
 
@@ -852,6 +899,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setOperatorForm(mapOperatorToForm(operator))
     setModalError("")
     setSuccess("")
+    setShowAllOperatorEvents(false)
     setOperatorModalOpen(true)
   }
 
@@ -2633,7 +2681,14 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   onChange={(event) => setOperatorForm((previous) => ({ ...previous, allowedVenues: event.target.value ? [event.target.value] : [] }))}
                 >
                   <option value="">All venues</option>
-                  {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                  <optgroup label="Entrances and lunch">
+                    {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                  </optgroup>
+                  {!isTeraOperatorEmail(operatorForm.email) && hallVenueOptions.length > 0 && (
+                    <optgroup label="Halls and session rooms">
+                      {hallVenueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                    </optgroup>
+                  )}
                 </select>
                 {isTeraOperatorEmail(operatorForm.email) && (
                   <small className="rec-muted">Moving this Tera to an entrance makes it record entrance events there.</small>
@@ -2709,27 +2764,55 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             </div>
             {events.length > 0 && (
               <div>
-                <span className="rec-label">Assigned Scan Events</span>
-                <p className="rec-muted mb-2">Leave all unchecked to allow every event of the selected types. Check specific events to lock this Tera/operator to those points only.</p>
-                <div className="rec-checkbox-grid rec-checkbox-grid-compact">
-                  {events.map((scanEvent) => (
-                    <label key={scanEvent.$id} className="rec-checkbox-option">
-                      <input
-                        type="checkbox"
-                        checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
-                        onChange={(event) => {
-                          setOperatorForm((previous) => ({
-                            ...previous,
-                            allowedEventIds: event.target.checked
-                              ? [...previous.allowedEventIds, scanEvent.$id]
-                              : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
-                          }))
-                        }}
-                      />
-                      {scanEvent.name} {scanEvent.venue ? `· ${scanEvent.venue}` : ""}
-                    </label>
-                  ))}
-                </div>
+                <span className="rec-label">
+                  Assigned Scan Events{operatorForm.allowedVenues?.[0] && !showAllOperatorEvents ? ` · ${operatorForm.allowedVenues[0]}` : ""}
+                </span>
+                <p className="rec-muted mb-2">
+                  {operatorForm.allowedVenues?.[0]
+                    ? "Showing the sessions at the chosen venue. Leave all unchecked to allow every event there, or check specific sessions to lock this operator to them."
+                    : "Leave all unchecked to allow every event of the selected types. Check specific events to lock this Tera/operator to those points only."}
+                </p>
+                {operatorForm.allowedVenues?.[0] && (
+                  <label className="rec-checkbox-option mb-2">
+                    <input
+                      type="checkbox"
+                      checked={showAllOperatorEvents}
+                      onChange={(event) => setShowAllOperatorEvents(event.target.checked)}
+                    />
+                    Show all events
+                  </label>
+                )}
+                {operatorEventGroups.length === 0 && (
+                  <p className="rec-muted">No scan events at this venue yet.</p>
+                )}
+                {operatorEventGroups.map(([dayLabel, items]) => (
+                  <div key={dayLabel} className="mb-2">
+                    <strong className="rec-muted">{dayLabel}</strong>
+                    <div className="rec-checkbox-grid rec-checkbox-grid-compact">
+                      {items.map(({ event: scanEvent, outsideVenue }) => (
+                        <label key={scanEvent.$id} className="rec-checkbox-option">
+                          <input
+                            type="checkbox"
+                            checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
+                            onChange={(event) => {
+                              setOperatorForm((previous) => ({
+                                ...previous,
+                                allowedEventIds: event.target.checked
+                                  ? [...previous.allowedEventIds, scanEvent.$id]
+                                  : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
+                              }))
+                            }}
+                          />
+                          {[formatTime(scanEvent.startTime), formatTime(scanEvent.endTime)].filter(Boolean).join("–")}
+                          {scanEvent.startTime ? " · " : ""}
+                          {scanEvent.name}
+                          {scanEvent.venue && (showAllOperatorEvents || outsideVenue) ? ` · ${scanEvent.venue}` : ""}
+                          {outsideVenue && !showAllOperatorEvents ? " (other venue)" : ""}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {dayOptions.length > 0 && (
