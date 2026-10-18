@@ -19,12 +19,13 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import dotenv from "dotenv"
 import { Query } from "node-appwrite"
-import { normalizeRecBadgeRole } from "../lib/rec-conference/rec-badge-display.mjs"
+import { formatRecBadgeDayTag, normalizeRecBadgeRole } from "../lib/rec-conference/rec-badge-display.mjs"
 import {
   buildKampalaAttendanceRange,
   normalizeRegistrationEmail,
 } from "../lib/rec-conference/registration-import-rules.mjs"
 import {
+  formatRecParticipantCategory,
   REC_BUSINESS_FORUM_ONLY_SESSION,
   REC_BUSINESS_FORUM_SESSION,
 } from "../lib/rec-conference/registration-tracks.mjs"
@@ -116,35 +117,63 @@ function personLabel(person) {
   return `${person.firstName} ${person.lastName} <${person.email || "no email"}>`
 }
 
+function splitDays(value) {
+  return String(value || "").split(/[;,|]/).map((day) => day.trim()).filter(Boolean)
+}
+
+// A group can set "days" (e.g. "20;21") and "sessions" (e.g. ["marketplace"])
+// for all its people. With "restrictDays", people found in the database are
+// limited to those days, unless an earlier group in the file also lists them,
+// in which case the days are added to what that group gave them.
+// "baseDays" (e.g. "20;21", the UG-EU BF days) are given to everyone in the
+// group on top of their own vetted days; Organisers get every day.
+// A group's "sessions" are also added to people already registered.
+// With "sharedEmail", several people may be created under one email (e.g. a
+// delegation's contact person); email matches then need the full name.
+// An empty role leaves the person's current badge role alone.
 function readPeople(data) {
   return (data.groups || []).flatMap((group) =>
-    (group.people || []).map(([firstName, lastName, email, role, organization, country, phone, days]) => ({
+    (group.people || []).map(([firstName, lastName, email, role, organization, country, phone, days, title]) => ({
       group: group.name,
       createIfMissing: Boolean(group.createIfMissing),
       forumDelegate: Boolean(group.forumDelegates),
+      restrictDays: Boolean(group.restrictDays),
+      sharedEmail: Boolean(group.sharedEmail),
+      sessions: Array.isArray(group.sessions) ? group.sessions : [],
       firstName: String(firstName || "").trim(),
       lastName: String(lastName || "").trim(),
+      title: String(title || "").trim(),
       email: normalizeRegistrationEmail(email),
-      role: normalizeRecBadgeRole(role),
+      role: role ? normalizeRecBadgeRole(role) : "",
       requestedRole: role,
       organization: String(organization || "").trim(),
       country: String(country || "").trim(),
       phone: String(phone || "").trim(),
-      days: String(days || "").split(/[;,|]/).map((day) => day.trim()).filter(Boolean),
+      days: splitDays(days).length ? splitDays(days) : splitDays(group.days),
+      baseDays: splitDays(group.baseDays),
     }))
   )
 }
 
 function attendance(person, days) {
-  const vetted = days.filter((day) => person.days.some((n) => String(day.date || "").endsWith(`-${n.padStart(2, "0")}`)))
-  const chosen = vetted.length ? vetted : days
+  const onDays = (list) => days.filter((day) => list.some((n) => String(day.date || "").endsWith(`-${n.padStart(2, "0")}`)))
+  const vetted = onDays(person.days)
+  const allowed = onDays([...person.days, ...person.baseDays])
+  const chosen = allowed.length && person.role !== "Organiser" ? allowed : days
+  const forumSessions = !person.forumDelegate
+    ? []
+    : vetted.length ? [REC_BUSINESS_FORUM_SESSION] : [REC_BUSINESS_FORUM_SESSION, REC_BUSINESS_FORUM_ONLY_SESSION]
   return {
     daysAttending: chosen.map((day) => day.label),
     ...buildKampalaAttendanceRange(chosen),
-    additionalSessions: !person.forumDelegate
-      ? []
-      : vetted.length ? [REC_BUSINESS_FORUM_SESSION] : [REC_BUSINESS_FORUM_SESSION, REC_BUSINESS_FORUM_ONLY_SESSION],
+    additionalSessions: Array.from(new Set([...forumSessions, ...person.sessions])),
   }
+}
+
+function sameList(left, right) {
+  const a = [...(left || [])].sort()
+  const b = [...(right || [])].sort()
+  return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
 function placeholderEmail(person) {
@@ -169,7 +198,7 @@ const data = JSON.parse(await fs.readFile(path.resolve(dataFile), "utf8"))
 const year = Number(data.conferenceYear)
 const people = readPeople(data)
 
-const invalidRoles = people.filter((person) => !person.role)
+const invalidRoles = people.filter((person) => person.requestedRole && !person.role)
 if (invalidRoles.length) {
   throw new Error(`Unknown badge roles: ${invalidRoles.map((p) => `${personLabel(p)} "${p.requestedRole}"`).join("; ")}`)
 }
@@ -189,13 +218,14 @@ const inConference = (registration) =>
   (Array.isArray(registration.conferenceYears) ? registration.conferenceYears : []).map(Number).includes(year)
 
 // Email matches first, so a name fallback cannot take a registration that an
-// email in this list already points at.
+// email in this list already points at. The same person may appear in two
+// groups (same email and name); both then work on the same registration.
 const claimed = new Map()
 const results = people.map((person) => ({ person, registration: null, how: "" }))
 for (const result of results) {
-  const candidates = (byEmail.get(result.person.email) || []).filter((r) => sharesNameWord(result.person, r))
+  const candidates = (byEmail.get(result.person.email) || []).filter((r) => (result.person.sharedEmail ? hasFullName : sharesNameWord)(result.person, r))
   const registration = candidates.find(inConference) || candidates[0]
-  if (registration && !claimed.has(registration.$id)) {
+  if (registration && (!claimed.has(registration.$id) || claimed.get(registration.$id).email === result.person.email)) {
     result.registration = registration
     result.how = "email"
     claimed.set(registration.$id, result.person)
@@ -215,6 +245,9 @@ for (const result of results.filter((item) => !item.registration)) {
 }
 
 const report = { updated: [], unchanged: [], addedToConference: [], created: [], missing: [], notInConference: [] }
+const seenInGroup = new Map()
+const keepNote = (earlierGroup, person) =>
+  earlierGroup && earlierGroup !== person.group && person.restrictDays ? ` (also on ${earlierGroup}, so those days are kept)` : ""
 
 console.log(`${APPLY ? "Applying" : "Dry run"}: ${people.length} people, ${conference.name || year}`)
 
@@ -224,9 +257,11 @@ for (const { person, registration, how } of results) {
       report.missing.push(`${person.group}: ${personLabel(person)}${how ? ` - ${how}` : ""}`)
       continue
     }
-    const usable = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email) && !byEmail.has(person.email)
+    const usable = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email) && (person.sharedEmail
+      ? !(byEmail.get(person.email) || []).some((r) => hasFullName(person, r))
+      : !byEmail.has(person.email))
     const email = usable ? person.email : placeholderEmail(person)
-    if (byEmail.has(email)) {
+    if (byEmail.has(email) && !(person.sharedEmail && email === person.email)) {
       report.missing.push(`${person.group}: ${personLabel(person)} - cannot create, ${email} is already used`)
       continue
     }
@@ -240,32 +275,48 @@ for (const { person, registration, how } of results) {
       stateRegion: NOT_PROVIDED,
       country: person.country || (person.forumDelegate ? NOT_PROVIDED : "Uganda"),
       registrationType: "Attendee",
-      badgeRole: person.role,
+      ...(person.role ? { badgeRole: person.role } : {}),
+      ...(person.title ? { title: person.title } : {}),
       conferenceYears: [year],
       ...attendance(person, days),
       additionalComments: `Added from the ${person.group} list.`,
     }
-    byEmail.set(email, [payload])
+    byEmail.set(email, [...(byEmail.get(email) || []), payload])
     if (APPLY) {
       await request(documentsPath(registrationsCollectionId), {
         method: "POST",
         body: { documentId: "unique()", data: payload },
       })
     }
-    const where = payload.additionalSessions.includes(REC_BUSINESS_FORUM_ONLY_SESSION)
-      ? "UG-EU BF only"
-      : payload.additionalSessions.length ? "REC26 & UG-EU BF" : "REC26 & Expo"
-    report.created.push(`${person.group}: ${personLabel(person)} as ${person.role}, ${where}, ${payload.daysAttending.length} day(s)${usable ? "" : `, email ${email}`}`)
+    const where = formatRecParticipantCategory(payload, year)
+    report.created.push(`${person.group}: ${personLabel(person)} as ${person.role || "Delegate"}, ${where}, ${payload.daysAttending.map(formatRecBadgeDayTag).join(" + ")}${usable ? "" : `, email ${email}`}`)
     continue
   }
 
   const changes = {}
-  if (registration.badgeRole !== person.role) changes.badgeRole = person.role
+  if (person.role && registration.badgeRole !== person.role) changes.badgeRole = person.role
   const registered = inConference(registration)
+  const earlierGroup = seenInGroup.get(registration.$id)
   if (!registered && person.createIfMissing) {
     changes.conferenceYears = [...(registration.conferenceYears || []), year]
     Object.assign(changes, attendance(person, days))
+  } else if (registered && person.restrictDays) {
+    const wanted = attendance(person, days)
+    const current = Array.isArray(registration.daysAttending) ? registration.daysAttending : []
+    // Keep days an earlier list in this file gave them; otherwise restrict.
+    const keep = earlierGroup && earlierGroup !== person.group
+    const dayLabels = keep ? days.map((d) => d.label).filter((label) => current.includes(label) || wanted.daysAttending.includes(label)) : wanted.daysAttending
+    const sessions = Array.from(new Set([...(registration.additionalSessions || []), ...wanted.additionalSessions]))
+    if (!sameList(dayLabels, current)) {
+      changes.daysAttending = dayLabels
+      Object.assign(changes, buildKampalaAttendanceRange(days.filter((d) => dayLabels.includes(d.label))))
+    }
+    if (!sameList(sessions, registration.additionalSessions || [])) changes.additionalSessions = sessions
+  } else if (registered && person.sessions.length) {
+    const sessions = Array.from(new Set([...(registration.additionalSessions || []), ...person.sessions]))
+    if (!sameList(sessions, registration.additionalSessions || [])) changes.additionalSessions = sessions
   }
+  if (!earlierGroup) seenInGroup.set(registration.$id, person.group)
   const label = `${person.group}: ${personLabel(person)} -> ${registration.firstName} ${registration.lastName} <${registration.email}> [${how}]`
   if (!registered && !person.createIfMissing) report.notInConference.push(label)
 
@@ -279,8 +330,15 @@ for (const { person, registration, how } of results) {
       body: { data: changes },
     })
   }
-  if (changes.conferenceYears) report.addedToConference.push(`${label} as ${person.role}`)
-  else report.updated.push(`${label}: ${registration.badgeRole || "(automatic)"} -> ${person.role}`)
+  // Later groups see this person as updated.
+  Object.assign(registration, changes)
+  const detail = [
+    changes.badgeRole ? `role ${changes.badgeRole}` : "",
+    changes.daysAttending ? `days ${changes.daysAttending.map(formatRecBadgeDayTag).join(" + ")}` : "",
+    changes.additionalSessions ? formatRecParticipantCategory({ additionalSessions: changes.additionalSessions }, year) : "",
+  ].filter(Boolean).join(", ")
+  if (changes.conferenceYears) report.addedToConference.push(`${label}: ${detail}`)
+  else report.updated.push(`${label}: ${detail}${keepNote(earlierGroup, person)}`)
 }
 
 report.renamed = []
@@ -303,7 +361,7 @@ for (const fix of data.nameCorrections || []) {
 
 const verb = APPLY ? "" : "would be "
 for (const [key, title] of [
-  ["updated", `Badge role ${verb}set`],
+  ["updated", `Existing registrations ${verb}updated`],
   ["addedToConference", `Existing people ${verb}added to ${year}`],
   ["created", `New registrations ${verb}created`],
   ["renamed", `Names ${verb}corrected`],
@@ -322,19 +380,23 @@ if (!APPLY) console.log("\nNothing was written. Run again with --apply to save t
 const previewArg = process.argv.find((arg) => arg.startsWith("--preview-pdf="))
 if (previewArg) {
   const out = path.resolve(previewArg.slice("--preview-pdf=".length))
-  const { renderBadge } = await import("../lib/rec-conference/badge-renderer.mjs")
+  const { renderBadge, addA3BadgePages } = await import("../lib/rec-conference/badge-renderer.mjs")
   const { resolveRecBadgeRole } = await import("../lib/rec-conference/rec-badge-display.mjs")
   const { getRecRegistrantName } = await import("../lib/rec-conference/scanning-analytics.mjs")
   const { formatRecParticipantCategoryTag } = await import("../lib/rec-conference/registration-tracks.mjs")
   const { PDFDocument } = await import("pdf-lib")
   const sharp = (await import("sharp")).default
-  // Full-resolution print PNGs make a multi-gigabyte file, so the preview
-  // embeds screen-resolution JPEGs on 93 x 125 mm pages.
-  const pt = 72 / 25.4
+  // Laid out nine to an A3 sheet like the print sheets. Full-resolution print
+  // PNGs make a multi-gigabyte file, so the preview embeds compressed JPEGs.
   const pdf = await PDFDocument.create()
-  let count = 0
-  for (const { registration } of results) {
-    if (!registration?.$id) continue
+  const cards = []
+  // --group=NAME limits the preview to one group of the file.
+  const onlyGroup = (process.argv.find((arg) => arg.startsWith("--group=")) || "").slice("--group=".length)
+  const printed = new Set()
+  for (const { person, registration } of results) {
+    if (onlyGroup && person.group !== onlyGroup) continue
+    if (!registration?.$id || printed.has(registration.$id)) continue
+    printed.add(registration.$id)
     const png = await renderBadge({
       registration: {
         ...registration,
@@ -345,11 +407,9 @@ if (previewArg) {
       badge: { badgeNumberLabel: "" },
       qrPayload: "NREP-PREVIEW-NOT-A-VALID-BADGE",
     }, { format: "png" })
-    const jpg = await sharp(png).resize({ width: 900 }).jpeg({ quality: 80 }).toBuffer()
-    const page = pdf.addPage([93 * pt, 125 * pt])
-    page.drawImage(await pdf.embedJpg(jpg), { x: 0, y: 0, width: 93 * pt, height: 125 * pt })
-    count += 1
+    cards.push(await sharp(png).resize({ width: 900 }).jpeg({ quality: 80 }).toBuffer())
   }
+  await addA3BadgePages(pdf, cards)
   await fs.writeFile(out, await pdf.save())
-  console.log(`\nPreview PDF: ${count} badges written to ${out}`)
+  console.log(`\nPreview PDF: ${cards.length} badges on ${pdf.getPageCount()} A3 sheets written to ${out}`)
 }

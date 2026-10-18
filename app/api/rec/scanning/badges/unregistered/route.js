@@ -14,6 +14,8 @@ export async function POST(request) {
       conferenceId: data.conferenceId || "",
       count: data.count,
       day: data.day || "",
+      days: Array.isArray(data.days) ? data.days : [],
+      startSerial: data.startSerial || 0,
       category: data.category || "",
       badgeRole: data.badgeRole || "",
     }, auth.session.userId)
