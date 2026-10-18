@@ -204,12 +204,17 @@ function isLunchUnit(unit) {
   return unit?.assignedRole === "Lunch Desk"
 }
 
+// Spare units are suspended until needed, so they are not offered.
+function isSpareUnit(unit) {
+  return unit?.assignedRole === "Spare"
+}
+
 function unitFace(unit, index) {
   if (isGateUnit(unit)) {
-    return { eyebrow: `Gate ${index + 1}`, title: "Main entrance", detail: "" }
+    return { eyebrow: `Entrance ${index + 1}`, title: unit.deployedLocation || "Entrance", detail: "" }
   }
   if (isLunchUnit(unit)) {
-    return { eyebrow: `Lunch ${index + 1}`, title: "Lunch", detail: "" }
+    return { eyebrow: `Lunch ${index + 1}`, title: unit.deployedLocation || "Lunch", detail: "" }
   }
   const match = String(unit.deployedLocation || "").match(/^(.*?)\s*\((.*)\)\s*$/)
   return {
@@ -984,7 +989,7 @@ export default function RecScannerPage() {
   const locked = !serialNumber
   const gateUnits = REC_TERA_HW0009_DEPLOYMENTS.filter(isGateUnit)
   const lunchUnits = REC_TERA_HW0009_DEPLOYMENTS.filter(isLunchUnit)
-  const hallUnits = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => !isGateUnit(unit) && !isLunchUnit(unit))
+  const hallUnits = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => !isGateUnit(unit) && !isLunchUnit(unit) && !isSpareUnit(unit))
   const selectedUnit = findUnlockUnit(REC_TERA_HW0009_DEPLOYMENTS, selectedSerial)
   const statusClass = handshakeError
     ? "rec-station-status rec-station-status-error"
@@ -1138,7 +1143,7 @@ export default function RecScannerPage() {
 
           {pendingUnit ? null : !selectedUnit ? (
             <div className="rec-station-board">
-              <UnitPicker title="Main entrance" units={gateUnits} onChoose={chooseUnit} layout="gates" />
+              <UnitPicker title="Entrance" units={gateUnits} onChoose={chooseUnit} layout="gates" />
               <UnitPicker title="Lunch" units={lunchUnits} onChoose={chooseUnit} layout="halls" />
               <UnitPicker title="Hall scanners" units={hallUnits} onChoose={chooseUnit} layout="halls" />
             </div>

@@ -270,18 +270,28 @@ test("Tera HW0009 fleet contains the ten registered serials", () => {
   assert.equal(isTeraHardwareSerial("99999999"), false)
 })
 
-test("Tera units: seven at the main entrance and three at lunch", () => {
-  const entrances = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Main Gate")
-  const lunch = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Lunch Desk")
-  assert.equal(REC_2026_SCANNER_HALLS.length, 8)
+test("Tera units: REC26 and UG-EUBF entrance and lunch, plus four spares", () => {
+  const byLocation = (location) => REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.deployedLocation === location)
   assert.equal(REC_TERA_HW0009_DEPLOYMENTS.length, 10)
-  assert.equal(entrances.length, 7)
-  assert.equal(entrances.every((unit) => unit.deployedLocation === "Main Entrance"), true)
-  assert.equal(lunch.length, 3)
-  assert.equal(lunch.every((unit) => unit.deployedLocation === "Lunch"), true)
+  assert.equal(byLocation("REC26 Entrance").length, 2)
+  assert.equal(byLocation("REC26 Lunch").length, 2)
+  assert.equal(byLocation("UG-EUBF Entrance").length, 1)
+  assert.equal(byLocation("UG-EUBF Lunch").length, 1)
+  assert.equal(byLocation("Spare").length, 4)
   assert.deepEqual(recPhoneScannerHalls(), REC_2026_SCANNER_HALLS)
-  for (const unit of entrances) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["conference_entry"])
-  for (const unit of lunch) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["lunch"])
+  for (const location of ["REC26 Entrance", "UG-EUBF Entrance"]) {
+    for (const unit of byLocation(location)) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["conference_entry"])
+  }
+  for (const location of ["REC26 Lunch", "UG-EUBF Lunch"]) {
+    for (const unit of byLocation(location)) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["lunch"])
+  }
+})
+
+test("REC26 and UG-EUBF venues never match each other", () => {
+  const venues = ["REC26 Entrance", "REC26 Lunch", "UG-EUBF Entrance", "UG-EUBF Lunch"]
+  for (const unitVenue of venues) {
+    for (const eventVenue of venues) assert.equal(venueMatchesAllowedList(eventVenue, [unitVenue]), unitVenue === eventVenue, unitVenue + " vs " + eventVenue)
+  }
 })
 
 test("exhibitor row devices cannot scan outside an exhibition hall", () => {
