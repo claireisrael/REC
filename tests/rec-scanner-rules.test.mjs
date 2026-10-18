@@ -27,6 +27,7 @@ import {
   eventMatchesOperatorRestrictions,
   venueMatchesAllowedList,
   isTeraScannerOperator,
+  teraRoleForVenue,
   selectTeraScanEvent,
   explainMissingTeraScanEvent,
   teraOperatorEmail,
@@ -269,28 +270,18 @@ test("Tera HW0009 fleet contains the ten registered serials", () => {
   assert.equal(isTeraHardwareSerial("99999999"), false)
 })
 
-test("Tera units are assigned to six halls plus four main-entrance scanners", () => {
-  const halls = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Hall Steward")
+test("Tera units: seven at the main entrance and three at lunch", () => {
   const entrances = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Main Gate")
+  const lunch = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => unit.assignedRole === "Lunch Desk")
   assert.equal(REC_2026_SCANNER_HALLS.length, 8)
-  assert.equal(halls.length, 6)
-  assert.equal(new Set(halls.map((unit) => unit.deployedLocation)).size, 6)
-  assert.equal(entrances.length, 4)
-  assert.equal(entrances.every((unit) => unit.deployedLocation === "Main Entrance"), true)
   assert.equal(REC_TERA_HW0009_DEPLOYMENTS.length, 10)
-  assert.deepEqual(recPhoneScannerHalls(), ["Rwizi", "Kazinga"])
-  assert.equal(
-    REC_TERA_HW0009_DEPLOYMENTS.some((unit) => /dining|food court|exhibition|rwizi|kazinga/i.test(`${unit.assignedRole} ${unit.deployedLocation}`)),
-    false
-  )
-  for (const unit of halls) {
-    const types = getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation)
-    assert.deepEqual(types, ["session_entry", "lunch"])
-  }
-  for (const unit of entrances) {
-    const types = getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation)
-    assert.deepEqual(types, ["conference_entry", "lunch"])
-  }
+  assert.equal(entrances.length, 7)
+  assert.equal(entrances.every((unit) => unit.deployedLocation === "Main Entrance"), true)
+  assert.equal(lunch.length, 3)
+  assert.equal(lunch.every((unit) => unit.deployedLocation === "Lunch"), true)
+  assert.deepEqual(recPhoneScannerHalls(), REC_2026_SCANNER_HALLS)
+  for (const unit of entrances) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["conference_entry"])
+  for (const unit of lunch) assert.deepEqual(getTeraStationEventTypes(unit.assignedRole, unit.deployedLocation), ["lunch"])
 })
 
 test("exhibitor row devices cannot scan outside an exhibition hall", () => {
@@ -390,7 +381,7 @@ test("scans outside the defined time gates are rejected", () => {
 
 test("Tera stations map onto the previous scan-event types", () => {
   assert.deepEqual(getTeraStationEventTypes("Hall Steward", "Achwa Hall"), ["session_entry", "lunch"])
-  assert.deepEqual(getTeraStationEventTypes("Main Gate", "Main Entrance"), ["conference_entry", "lunch"])
+  assert.deepEqual(getTeraStationEventTypes("Main Gate", "Main Entrance"), ["conference_entry"])
   assert.equal(hidScanTypeToEventType(HID_SCAN_TYPES.ENTRANCE_ACCESS), "conference_entry")
   assert.equal(hidScanTypeToEventType(HID_SCAN_TYPES.LUNCH_CHECKIN), "lunch")
   assert.equal(hidScanTypeToEventType(HID_SCAN_TYPES.SESSION_ATTENDANCE), "session_entry")
@@ -742,4 +733,15 @@ test("breakout-session lookup is only needed during the Kampala lunch window", (
   assert.equal(isHidLunchWindow("2026-10-19T10:00:00Z"), true)
   assert.equal(isHidLunchWindow("2026-10-19T10:59:00Z"), true)
   assert.equal(isHidLunchWindow("2026-10-19T11:00:00Z"), false)
+})
+
+test("entrances record entrance events and lunch desks record lunch", () => {
+  for (const location of ["EU Entrance", "Marketplace Entrance", "Main Entrance"]) {
+    assert.deepEqual(getTeraStationEventTypes("", location), ["conference_entry"], location)
+    assert.equal(teraRoleForVenue(location), "Main Gate")
+  }
+  assert.deepEqual(getTeraStationEventTypes("Lunch Desk", "Lunch"), ["lunch"])
+  assert.equal(teraRoleForVenue("Lunch"), "Lunch Desk")
+  assert.equal(teraRoleForVenue("Achwa Hall"), "Hall Steward")
+  assert.deepEqual(getTeraStationEventTypes("Hall Steward", "Achwa Hall"), ["session_entry", "lunch"])
 })

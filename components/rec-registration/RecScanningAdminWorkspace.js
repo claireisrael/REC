@@ -2631,11 +2631,13 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   className="rec-select"
                   value={operatorForm.allowedVenues[0] || ""}
                   onChange={(event) => setOperatorForm((previous) => ({ ...previous, allowedVenues: event.target.value ? [event.target.value] : [] }))}
-                  disabled={isTeraOperatorEmail(operatorForm.email)}
                 >
                   <option value="">All venues</option>
                   {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
                 </select>
+                {isTeraOperatorEmail(operatorForm.email) && (
+                  <small className="rec-muted">Moving this Tera to an entrance makes it record entrance events there.</small>
+                )}
               </div>
             </div>
             {!isTeraOperatorEmail(operatorForm.email) && (
