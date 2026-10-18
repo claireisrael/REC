@@ -467,23 +467,38 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     [events, venueOptions]
   )
   const [showAllOperatorEvents, setShowAllOperatorEvents] = useState(false)
-  // With a venue chosen, the form lists that venue's events by day; events
-  // already ticked elsewhere stay visible so nothing is unticked unseen.
+  // Events are listed per venue (hall, entrance, lunch), then per day. With
+  // a venue chosen only that venue is listed, plus any events already ticked
+  // elsewhere, so nothing is unticked unseen.
   const operatorEventGroups = useMemo(() => {
     const venue = operatorForm.allowedVenues?.[0] || ""
     const chosen = new Set(operatorForm.allowedEventIds || [])
     const inVenue = (event) => !venue || (event.venue && venueMatchesAllowedList(event.venue, [venue]))
-    const visible = events
-      .filter((event) => showAllOperatorEvents || inVenue(event) || chosen.has(event.$id))
-      .sort((left, right) => (Number(left.day || 99) - Number(right.day || 99))
-        || String(left.startTime || "").localeCompare(String(right.startTime || ""))
-        || String(left.name || "").localeCompare(String(right.name || "")))
-    const groups = new Map()
-    for (const event of visible) {
-      const key = event.day ? `Day ${event.day}${event.date ? ` · ${event.date}` : ""}` : "Any day"
-      groups.set(key, [...(groups.get(key) || []), { event, outsideVenue: !inVenue(event) }])
+    const byTime = (left, right) => (Number(left.day || 99) - Number(right.day || 99))
+      || String(left.startTime || "").localeCompare(String(right.startTime || ""))
+      || String(left.name || "").localeCompare(String(right.name || ""))
+    const venues = new Map()
+    for (const event of events) {
+      if (venue && !showAllOperatorEvents && !inVenue(event) && !chosen.has(event.$id)) continue
+      const name = String(event.venue || "").trim() || "No venue"
+      venues.set(name, [...(venues.get(name) || []), event])
     }
-    return Array.from(groups.entries())
+    return Array.from(venues.entries())
+      .map(([name, list]) => {
+        const days = new Map()
+        for (const event of [...list].sort(byTime)) {
+          const key = event.day ? `Day ${event.day}${event.date ? ` · ${event.date}` : ""}` : "Any day"
+          days.set(key, [...(days.get(key) || []), event])
+        }
+        return {
+          venue: name,
+          matchesVenue: Boolean(venue) && list.some(inVenue),
+          total: list.length,
+          ticked: list.filter((event) => chosen.has(event.$id)).length,
+          days: Array.from(days.entries()),
+        }
+      })
+      .sort((left, right) => Number(right.matchesVenue) - Number(left.matchesVenue) || left.venue.localeCompare(right.venue))
   }, [events, operatorForm.allowedEventIds, operatorForm.allowedVenues, showAllOperatorEvents])
   const visibleEventIds = useMemo(() => events.map((event) => event.$id).filter(Boolean), [events])
   const allVisibleEventsSelected = visibleEventIds.length > 0
@@ -2684,7 +2699,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   <optgroup label="Entrances and lunch">
                     {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
                   </optgroup>
-                  {!isTeraOperatorEmail(operatorForm.email) && hallVenueOptions.length > 0 && (
+                  {hallVenueOptions.length > 0 && (
                     <optgroup label="Halls and session rooms">
                       {hallVenueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
                     </optgroup>
@@ -2785,33 +2800,47 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                 {operatorEventGroups.length === 0 && (
                   <p className="rec-muted">No scan events at this venue yet.</p>
                 )}
-                {operatorEventGroups.map(([dayLabel, items]) => (
-                  <div key={dayLabel} className="mb-2">
-                    <strong className="rec-muted">{dayLabel}</strong>
-                    <div className="rec-checkbox-grid rec-checkbox-grid-compact">
-                      {items.map(({ event: scanEvent, outsideVenue }) => (
-                        <label key={scanEvent.$id} className="rec-checkbox-option">
-                          <input
-                            type="checkbox"
-                            checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
-                            onChange={(event) => {
-                              setOperatorForm((previous) => ({
-                                ...previous,
-                                allowedEventIds: event.target.checked
-                                  ? [...previous.allowedEventIds, scanEvent.$id]
-                                  : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
-                              }))
-                            }}
-                          />
-                          {[formatTime(scanEvent.startTime), formatTime(scanEvent.endTime)].filter(Boolean).join("–")}
-                          {scanEvent.startTime ? " · " : ""}
-                          {scanEvent.name}
-                          {scanEvent.venue && (showAllOperatorEvents || outsideVenue) ? ` · ${scanEvent.venue}` : ""}
-                          {outsideVenue && !showAllOperatorEvents ? " (other venue)" : ""}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                {operatorEventGroups.map((group) => (
+                  <details
+                    key={`${group.venue}-${operatorForm.allowedVenues?.[0] || ""}`}
+                    className="rec-panel mb-2 p-2"
+                    open={group.matchesVenue || operatorEventGroups.length === 1}
+                  >
+                    <summary>
+                      <strong>{group.venue}</strong>
+                      <span className="rec-muted">
+                        {" "}· {group.total} event{group.total === 1 ? "" : "s"}
+                        {group.ticked ? ` · ${group.ticked} ticked` : ""}
+                        {operatorForm.allowedVenues?.[0] && !group.matchesVenue ? " · other venue" : ""}
+                      </span>
+                    </summary>
+                    {group.days.map(([dayLabel, dayEvents]) => (
+                      <div key={dayLabel} className="mt-2">
+                        <small className="rec-muted">{dayLabel}</small>
+                        <div className="rec-checkbox-grid rec-checkbox-grid-compact">
+                          {dayEvents.map((scanEvent) => (
+                            <label key={scanEvent.$id} className="rec-checkbox-option">
+                              <input
+                                type="checkbox"
+                                checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
+                                onChange={(event) => {
+                                  setOperatorForm((previous) => ({
+                                    ...previous,
+                                    allowedEventIds: event.target.checked
+                                      ? [...previous.allowedEventIds, scanEvent.$id]
+                                      : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
+                                  }))
+                                }}
+                              />
+                              {[formatTime(scanEvent.startTime), formatTime(scanEvent.endTime)].filter(Boolean).join("–")}
+                              {scanEvent.startTime ? " · " : ""}
+                              {scanEvent.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </details>
                 ))}
               </div>
             )}
