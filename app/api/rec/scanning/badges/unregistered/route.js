@@ -13,6 +13,9 @@ export async function POST(request) {
     const result = await releaseUnregisteredQrCodes({
       conferenceId: data.conferenceId || "",
       count: data.count,
+      day: data.day || "",
+      category: data.category || "",
+      badgeRole: data.badgeRole || "",
     }, auth.session.userId)
     return NextResponse.json(result, { status: result.failed ? 207 : 200 })
   } catch (error) {

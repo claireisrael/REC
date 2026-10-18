@@ -32,6 +32,8 @@ import { useAppwrite } from "@/lib/appwrite/provider"
 import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
 import { getRecBadgeViewPath, REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
+import { REC_BADGE_ROLES } from "@/lib/rec-conference/rec-badge-display.mjs"
+import { recParticipantCategoryFilterOptions } from "@/lib/rec-conference/registration-tracks.mjs"
 import RecConfirmDialog from "@/components/rec-registration/RecConfirmDialog"
 import RecBadgeExports from "@/components/rec-registration/RecBadgeExports"
 import RecExhibitorReadiness from "@/components/rec-registration/RecExhibitorReadiness"
@@ -412,6 +414,9 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [unregisteredOpen, setUnregisteredOpen] = useState(false)
   const [unregisteredCount, setUnregisteredCount] = useState(10)
+  const [unregisteredDay, setUnregisteredDay] = useState("")
+  const [unregisteredCategory, setUnregisteredCategory] = useState("")
+  const [unregisteredRole, setUnregisteredRole] = useState("")
   const workspaceRequestId = useRef(0)
 
   const selectedConference = useMemo(
@@ -1005,7 +1010,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       const issuedResults = []
       const chunkSize = sendEmail ? 2 : 100
       for (let index = 0; index < registrationIds.length; index += chunkSize) {
-        const chunk = registrationIds.slice(index, index + 100)
+        const chunk = registrationIds.slice(index, index + chunkSize)
         if (sendEmail && registrationIds.length > 1) {
           setSuccess(`Sending badge emails… ${index} of ${registrationIds.length}`)
         }
@@ -1098,7 +1103,13 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     try {
       const result = await fetchJson("/api/rec/scanning/badges/unregistered", {
         method: "POST",
-        body: JSON.stringify({ conferenceId, count }),
+        body: JSON.stringify({
+          conferenceId,
+          count,
+          day: unregisteredDay,
+          category: unregisteredCategory,
+          badgeRole: unregisteredRole,
+        }),
       })
       const released = Array.isArray(result.released) ? result.released : []
       const ids = released.map((item) => item.registrationId).filter(Boolean)
@@ -1142,9 +1153,9 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     }
   }
 
-  const generateNotIssuedBadges = async () => {
+  const generateNotIssuedBadges = async ({ sendEmail = true } = {}) => {
     if (!conferenceId) return
-    setSaving("badge-generate-all")
+    setSaving(sendEmail ? "badge-generate-all" : "badge-generate-quiet")
     setError("")
     try {
       const ids = Array.from(await loadMatchingBadgeIds("without_badge"))
@@ -1153,22 +1164,65 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         return
       }
       setConfirmDialog({
-        title: "Generate badges",
+        title: sendEmail ? "Generate badges" : "Generate badges without email",
         confirmLabel: `Generate ${ids.length}`,
         busyKey: "badges",
-        body: (
+        body: sendEmail ? (
           <p>
             This creates a badge for {ids.length} {ids.length === 1 ? "person" : "people"} who have not been issued one and emails each person a digital copy to use if their physical badge is lost.
             They move to Active. People who already have a badge are left as they are.
           </p>
+        ) : (
+          <p>
+            This creates a badge for {ids.length} {ids.length === 1 ? "person" : "people"} who have not been issued one, ready to print. No emails are sent.
+            You can email their digital copies later with Email not yet sent.
+          </p>
         ),
         onConfirm: async () => {
-          await issueBadges(ids, { sendEmail: true, scope: "any" })
+          await issueBadges(ids, { sendEmail, scope: "any" })
           setConfirmDialog(null)
         },
       })
     } catch (err) {
       setError(err.message || "Could not load the people who need a badge.")
+    } finally {
+      setSaving("")
+    }
+  }
+
+  // everyone: override that resends to every active badge, including people
+  // who were already emailed.
+  const emailNotYetSentBadges = async ({ everyone = false } = {}) => {
+    if (!conferenceId) return
+    setSaving(everyone ? "badge-email-all" : "badge-email-unsent")
+    setError("")
+    try {
+      const ids = Array.from(await loadMatchingBadgeIds(everyone ? "with_badge" : "not_emailed"))
+      if (!ids.length) {
+        setError(everyone ? "No one has an active badge yet." : "Everyone with an active badge has been emailed their digital copy.")
+        return
+      }
+      setConfirmDialog({
+        title: everyone ? "Send all digital badges" : "Email digital tags",
+        confirmLabel: `Email ${ids.length}`,
+        busyKey: "badges",
+        body: (
+          <>
+            <p>
+              {everyone
+                ? `This emails a digital copy of their tag to all ${ids.length} people with an active badge, including anyone who already received one.`
+                : `This emails a digital copy of their tag to ${ids.length} ${ids.length === 1 ? "person" : "people"} whose badge was generated without an email.`}
+            </p>
+            <p>Their QR codes stay the same, so printed badges keep working. Keep this page open until sending finishes.</p>
+          </>
+        ),
+        onConfirm: async () => {
+          await issueBadges(ids, { sendEmail: true, scope: "resend" })
+          setConfirmDialog(null)
+        },
+      })
+    } catch (err) {
+      setError(err.message || "Could not load the people waiting for an email.")
     } finally {
       setSaving("")
     }
@@ -1786,11 +1840,38 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                     <button
                       type="button"
                       className="rec-btn rec-btn-primary"
-                      onClick={generateNotIssuedBadges}
+                      onClick={() => generateNotIssuedBadges()}
                       disabled={!conferenceId || saving === "badges" || saving === "badge-generate-all" || !(badgeRegistry.counts?.withoutBadge > 0)}
                     >
                       {saving === "badge-generate-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faQrcode} />}
                       Generate not issued ({badgeRegistry.counts?.withoutBadge || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={() => generateNotIssuedBadges({ sendEmail: false })}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-generate-quiet" || !(badgeRegistry.counts?.withoutBadge > 0)}
+                    >
+                      {saving === "badge-generate-quiet" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faQrcode} />}
+                      Generate without email ({badgeRegistry.counts?.withoutBadge || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-outline"
+                      onClick={() => emailNotYetSentBadges()}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-email-unsent" || !(badgeRegistry.counts?.notEmailed > 0)}
+                    >
+                      {saving === "badge-email-unsent" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faEnvelope} />}
+                      Email not yet sent ({badgeRegistry.counts?.notEmailed || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className="rec-btn rec-btn-accent"
+                      onClick={() => emailNotYetSentBadges({ everyone: true })}
+                      disabled={!conferenceId || saving === "badges" || saving === "badge-email-all" || !(badgeRegistry.counts?.withBadge > 0)}
+                    >
+                      {saving === "badge-email-all" ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faEnvelope} />}
+                      Send all digital badges ({badgeRegistry.counts?.withBadge || 0})
                     </button>
                     <button
                       type="button"
@@ -2763,6 +2844,47 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
               value={unregisteredCount}
               onChange={(event) => setUnregisteredCount(event.target.value)}
             />
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-day">Valid on</label>
+            <select
+              id="unregistered-day"
+              className="rec-select"
+              value={unregisteredDay}
+              onChange={(event) => setUnregisteredDay(event.target.value)}
+            >
+              <option value="">Every conference day</option>
+              {(Array.isArray(dayOptions) ? dayOptions : []).filter((day) => day?.label).map((day) => (
+                <option key={day.label} value={day.label}>{day.label} only</option>
+              ))}
+            </select>
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-category">Participant category</label>
+            <select
+              id="unregistered-category"
+              className="rec-select"
+              value={unregisteredCategory}
+              onChange={(event) => setUnregisteredCategory(event.target.value)}
+            >
+              {recParticipantCategoryFilterOptions(selectedConference?.year).map((option) => (
+                <option key={option.value} value={option.value === "rec" ? "" : option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="rec-field">
+            <label className="rec-label" htmlFor="unregistered-role">Printed as</label>
+            <select
+              id="unregistered-role"
+              className="rec-select"
+              value={unregisteredRole}
+              onChange={(event) => setUnregisteredRole(event.target.value)}
+            >
+              <option value="">Delegate</option>
+              {REC_BADGE_ROLES.filter((role) => role !== "Delegate").map((role) => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
           </div>
           {modalError && <div className="rec-alert rec-alert-danger" role="alert">{modalError}</div>}
         </ScannerManagementModal>

@@ -11,6 +11,7 @@ import {
   formatRecBadgeVenue,
   formatDelegateSerial,
   formatRecBadgeCardCopy,
+  formatRecBadgeDayTag,
   formatRecWalkInBadgeName,
   readDelegateSerial,
   resolveRecBadgeRole,
@@ -75,6 +76,26 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
     { name: "Delegate", underName: "" }
   )
   assert.deepEqual(
+    formatRecBadgeCardCopy({
+      registrationType: "Unregistered",
+      organization: "D-121",
+      badgeRole: "press",
+      daysAttending: ["19th October – Day 1"],
+    }),
+    { name: "Press", underName: "D-121 · 19 OCT" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({
+      registrationType: "Unregistered",
+      organization: "D-002",
+      daysAttending: ["19th October – Day 1", "22nd October - Day 4"],
+    }),
+    { name: "Delegate", underName: "D-002" }
+  )
+  assert.equal(formatRecWalkInBadgeName({ registrationType: "Unregistered", badgeRole: "Press", lastName: "REC26-000009" }), "Press REC26-000009")
+  assert.equal(formatRecBadgeDayTag("22nd October - Day 4"), "22 OCT")
+  assert.equal(formatRecBadgeDayTag("Day 4"), "")
+  assert.deepEqual(
     formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Claire Namagala", organization: "NREP" }),
     { name: "Claire Namagala", underName: "NREP" }
   )
@@ -90,6 +111,10 @@ test("badge role uses the chosen role, otherwise follows the registration type",
   assert.equal(resolveRecBadgeRole({ registrationType: "Attendee" }), "Delegate")
   assert.equal(resolveRecBadgeRole({ registrationType: "Sponsor" }), "Delegate")
   assert.equal(resolveRecBadgeRole({ registrationType: "Exhibitor" }), "Exhibitor")
-  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Speaker" }), "Delegate")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "speaker" }), "Speaker")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Organiser" }), "Organiser")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "eu-exhibitor" }), "EU-Exhibitor")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Press" }), "Press")
+  assert.equal(resolveRecBadgeRole({ registrationType: "Attendee", badgeRole: "Sponsor" }), "Delegate")
   assert.equal(resolveRecBadgeRole({ registrationType: "Unregistered" }), "")
 })
