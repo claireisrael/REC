@@ -128,6 +128,7 @@ function splitDays(value) {
 // "baseDays" (e.g. "20;21", the UG-EU BF days) are given to everyone in the
 // group on top of their own vetted days; Organisers get every day.
 // A group's "sessions" are also added to people already registered.
+// "emailMatchOnly" matches people by email only, never by name.
 // With "sharedEmail", several people may be created under one email (e.g. a
 // delegation's contact person); email matches then need the full name.
 // An empty role leaves the person's current badge role alone.
@@ -139,6 +140,7 @@ function readPeople(data) {
       forumDelegate: Boolean(group.forumDelegates),
       restrictDays: Boolean(group.restrictDays),
       sharedEmail: Boolean(group.sharedEmail),
+      emailMatchOnly: Boolean(group.emailMatchOnly),
       sessions: Array.isArray(group.sessions) ? group.sessions : [],
       firstName: String(firstName || "").trim(),
       lastName: String(lastName || "").trim(),
@@ -231,7 +233,9 @@ for (const result of results) {
     claimed.set(registration.$id, result.person)
   }
 }
-for (const result of results.filter((item) => !item.registration)) {
+// "emailMatchOnly" groups skip this: a list with single names (e.g. "Isma")
+// would otherwise take over someone else's registration.
+for (const result of results.filter((item) => !item.registration && !item.person.emailMatchOnly)) {
   const matches = registrations.filter((r) => !claimed.has(r.$id) && hasFullName(result.person, r))
   const current = matches.filter(inConference)
   const pick = current.length ? current : matches
