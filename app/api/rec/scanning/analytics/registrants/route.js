@@ -15,6 +15,7 @@ export async function GET(request) {
       eventId: searchParams.get("eventId") || "",
       from: searchParams.get("from") || "",
       to: searchParams.get("to") || "",
+      station: searchParams.get("station") || "",
       search: searchParams.get("search") || "",
       attendance: searchParams.get("attendance") || "all",
       registrationType: searchParams.get("registrationType") || "",

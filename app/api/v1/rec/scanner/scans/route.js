@@ -34,6 +34,20 @@ export async function GET(request) {
       )
     }
 
+    // The unit is recognised; its assigned operator must now sign in with
+    // an emailed code (/api/v1/rec/scanner/tera/*). No token yet.
+    if (handshake.operatorLoginRequired) {
+      return NextResponse.json({
+        ok: true,
+        operatorLoginRequired: true,
+        allocation: {
+          serialNumber: handshake.allocation.serialNumber,
+          assignedRole: handshake.allocation.assignedRole,
+          deployedLocation: handshake.allocation.deployedLocation,
+        },
+      })
+    }
+
     return NextResponse.json({
       ok: true,
       allocation: handshake.allocation,
@@ -75,6 +89,7 @@ export async function POST(request) {
         serialNumber: stationContext.serialNumber,
         qrData: data.qrData || data.qrPayload,
         allocation: stationContext.allocation,
+        stationOperator: stationContext.stationOperator,
       })
       const status = result.status === "duplicate" ? 200 : 201
       return NextResponse.json(result, { status })
