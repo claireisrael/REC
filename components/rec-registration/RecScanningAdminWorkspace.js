@@ -1740,7 +1740,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                             )}
                             {operator.deviceKind === "tera_hid" && Array.isArray(operator.assignedOperators) && (
                               operator.assignedOperators.length
-                                ? <span className="rec-chip">Operators: {formatList(operator.assignedOperators.map((person) => person.name || person.email))}</span>
+                                ? <span className="rec-chip">Unlocked by: {formatList(operator.assignedOperators.map((person) => `${person.name} (${person.email})`))}</span>
                                 : <span className="rec-status rec-status-archived">No operator assigned · cannot be unlocked</span>
                             )}
                           </div>
@@ -2640,6 +2640,23 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                 )}
               </div>
             </div>
+            {isTeraOperatorEmail(operatorForm.email) && (
+              <div>
+                <span className="rec-label">People who can unlock this unit</span>
+                {(operators.find((item) => item.$id === editingOperatorId)?.assignedOperators || []).length ? (
+                  <ul className="rec-muted mb-2">
+                    {operators.find((item) => item.$id === editingOperatorId).assignedOperators.map((person) => (
+                      <li key={person.$id}>{person.name} · {person.email}{person.status !== "active" ? ` (${person.status})` : ""}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="rec-muted mb-2">Nobody yet. Open a person&apos;s operator record and tick this unit.</p>
+                )}
+                <p className="rec-muted mb-2">
+                  The email above is this unit&apos;s own internal address. People sign in at /rec-scanner with their own email after scanning the unit&apos;s code.
+                </p>
+              </div>
+            )}
             {!isTeraOperatorEmail(operatorForm.email) && (
               <div>
                 <span className="rec-label">Tera scanners this person can unlock</span>
