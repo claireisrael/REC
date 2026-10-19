@@ -30,7 +30,12 @@ import {
 import { useAuth } from "@/lib/auth/auth-provider"
 import { useAppwrite } from "@/lib/appwrite/provider"
 import { getAllRecConferences } from "@/lib/appwrite/rec-conferences"
-import { getRecBadgeViewPath, REC_2026_SCANNER_HALLS } from "@/lib/rec-conference/scanning-rules.mjs"
+import {
+  getRecBadgeViewPath,
+  REC_SCANNER_RESTRICTION_VENUES,
+  REC_TERA_HW0009_DEPLOYMENTS,
+  venueMatchesAllowedList,
+} from "@/lib/rec-conference/scanning-rules.mjs"
 import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 import { REC_BADGE_ROLES } from "@/lib/rec-conference/rec-badge-display.mjs"
 import { recParticipantCategoryFilterOptions } from "@/lib/rec-conference/registration-tracks.mjs"
@@ -81,10 +86,16 @@ const emptyOperatorForm = {
   allowedEventIds: [],
   allowedVenues: [],
   allowedDays: [],
+  teraSerials: [],
   accessStartDate: "",
   accessStartTime: "",
   accessEndDate: "",
   accessEndTime: "",
+}
+
+function teraUnitLabel(serial) {
+  const unit = REC_TERA_HW0009_DEPLOYMENTS.find((item) => item.serialNumber === serial)
+  return unit ? `${unit.deployedLocation} (${serial})` : serial
 }
 
 const emptyTeraAccessForm = {
@@ -136,6 +147,14 @@ function formatDate(value) {
     timeStyle: "short",
     timeZone: "Africa/Kampala",
   })
+}
+
+// "14:00" in Kampala time, or "" without a time.
+function formatTime(value) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Kampala" })
 }
 
 function formatList(values, fallback = "None") {
@@ -193,6 +212,7 @@ function mapOperatorToForm(operator) {
     allowedEventIds: operator.allowedEventIds || [],
     allowedVenues: operator.allowedVenues || [],
     allowedDays: operator.allowedDays || [],
+    teraSerials: operator.teraSerials || [],
     accessStartDate: start.date,
     accessStartTime: start.time,
     accessEndDate: end.date,
@@ -414,7 +434,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [unregisteredOpen, setUnregisteredOpen] = useState(false)
   const [unregisteredCount, setUnregisteredCount] = useState(10)
-  const [unregisteredDay, setUnregisteredDay] = useState("")
+  const [unregisteredDays, setUnregisteredDays] = useState([])
+  const [unregisteredStart, setUnregisteredStart] = useState("")
   const [unregisteredCategory, setUnregisteredCategory] = useState("")
   const [unregisteredRole, setUnregisteredRole] = useState("")
   const workspaceRequestId = useRef(0)
@@ -429,15 +450,56 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     : "/dashboard/rec-conference/admin/registrations/new"
 
   const dayOptions = selectedConference?.days || []
+  // A venue saved on the operator being edited stays listed, so saving the
+  // form does not silently drop an older restriction.
   const venueOptions = useMemo(
     () => Array.from(new Set([
-      ...REC_2026_SCANNER_HALLS,
-      "Main Entrance",
-      ...events.map((event) => event.venue),
-      ...operators.flatMap((operator) => operator.allowedVenues || []),
-    ].filter(Boolean))).sort(),
-    [events, operators]
+      ...REC_SCANNER_RESTRICTION_VENUES,
+      ...(operatorForm.allowedVenues || []),
+    ].filter(Boolean))),
+    [operatorForm.allowedVenues]
   )
+  // Halls that have scan events, for people scanning sessions in a hall.
+  const hallVenueOptions = useMemo(
+    () => Array.from(new Set(events.map((event) => String(event.venue || "").trim()).filter(Boolean)))
+      .filter((venue) => !venueOptions.includes(venue))
+      .sort((left, right) => left.localeCompare(right)),
+    [events, venueOptions]
+  )
+  const [showAllOperatorEvents, setShowAllOperatorEvents] = useState(false)
+  // Events are listed per venue (hall, entrance, lunch), then per day. With
+  // a venue chosen only that venue is listed, plus any events already ticked
+  // elsewhere, so nothing is unticked unseen.
+  const operatorEventGroups = useMemo(() => {
+    const venue = operatorForm.allowedVenues?.[0] || ""
+    const chosen = new Set(operatorForm.allowedEventIds || [])
+    const inVenue = (event) => !venue || (event.venue && venueMatchesAllowedList(event.venue, [venue]))
+    const byTime = (left, right) => (Number(left.day || 99) - Number(right.day || 99))
+      || String(left.startTime || "").localeCompare(String(right.startTime || ""))
+      || String(left.name || "").localeCompare(String(right.name || ""))
+    const venues = new Map()
+    for (const event of events) {
+      if (venue && !showAllOperatorEvents && !inVenue(event) && !chosen.has(event.$id)) continue
+      const name = String(event.venue || "").trim() || "No venue"
+      venues.set(name, [...(venues.get(name) || []), event])
+    }
+    return Array.from(venues.entries())
+      .map(([name, list]) => {
+        const days = new Map()
+        for (const event of [...list].sort(byTime)) {
+          const key = event.day ? `Day ${event.day}${event.date ? ` · ${event.date}` : ""}` : "Any day"
+          days.set(key, [...(days.get(key) || []), event])
+        }
+        return {
+          venue: name,
+          matchesVenue: Boolean(venue) && list.some(inVenue),
+          total: list.length,
+          ticked: list.filter((event) => chosen.has(event.$id)).length,
+          days: Array.from(days.entries()),
+        }
+      })
+      .sort((left, right) => Number(right.matchesVenue) - Number(left.matchesVenue) || left.venue.localeCompare(right.venue))
+  }, [events, operatorForm.allowedEventIds, operatorForm.allowedVenues, showAllOperatorEvents])
   const visibleEventIds = useMemo(() => events.map((event) => event.$id).filter(Boolean), [events])
   const allVisibleEventsSelected = visibleEventIds.length > 0
     && visibleEventIds.every((eventId) => selectedEventIds.includes(eventId))
@@ -495,11 +557,22 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
       limit: String(operatorLimit),
     })
     const shouldLoadEvents = activeView === "events" || activeView === "operators"
+    // The operator form lists every session, so load all pages there.
+    const loadAllEvents = async () => {
+      const first = await fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+      const documents = [...(first.documents || [])]
+      for (let page = 2; page <= (first.totalPages || 1); page += 1) {
+        eventParams.set("page", String(page))
+        const next = await fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+        documents.push(...(next.documents || []))
+      }
+      return { ...first, documents }
+    }
     let eventData, operatorData, badgeData
     try {
       [eventData, operatorData, badgeData] = await Promise.all([
         shouldLoadEvents
-          ? fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`)
+          ? (activeView === "operators" ? loadAllEvents() : fetchJson(`/api/rec/scanning/events?${eventParams.toString()}`))
           : Promise.resolve({ documents: [], total: 0, page: 1, limit: eventLimit, totalPages: 1 }),
         activeView === "operators"
           ? fetchJson(`/api/rec/scanning/operators?${operatorParams.toString()}`)
@@ -832,6 +905,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setOperatorForm(emptyOperatorForm)
     setModalError("")
     setSuccess("")
+    setShowAllOperatorEvents(false)
     setOperatorModalOpen(true)
   }
 
@@ -840,6 +914,7 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
     setOperatorForm(mapOperatorToForm(operator))
     setModalError("")
     setSuccess("")
+    setShowAllOperatorEvents(false)
     setOperatorModalOpen(true)
   }
 
@@ -1106,7 +1181,8 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
         body: JSON.stringify({
           conferenceId,
           count,
-          day: unregisteredDay,
+          days: unregisteredDays,
+          startSerial: Number.parseInt(unregisteredStart, 10) || 0,
           category: unregisteredCategory,
           badgeRole: unregisteredRole,
         }),
@@ -1722,13 +1798,21 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                             )}
                             {operator.allowedVenues.length > 0 && <span className="rec-chip">{formatList(operator.allowedVenues)}</span>}
                             {operator.allowedDays.length > 0 && <span className="rec-chip">Days {formatList(operator.allowedDays)}</span>}
+                            {operator.deviceKind !== "tera_hid" && (operator.teraSerials || []).length > 0 && (
+                              <span className="rec-chip">Unlocks Tera: {formatList(operator.teraSerials.map(teraUnitLabel))}</span>
+                            )}
+                            {operator.deviceKind === "tera_hid" && Array.isArray(operator.assignedOperators) && (
+                              operator.assignedOperators.length
+                                ? <span className="rec-chip">Unlocked by: {formatList(operator.assignedOperators.map((person) => `${person.name} (${person.email})`))}</span>
+                                : <span className="rec-status rec-status-archived">No operator assigned · cannot be unlocked</span>
+                            )}
                           </div>
                           <div className="rec-row-desc mt-2">
                             {operatorAccessSummary(operator)}
                           </div>
                           {operator.deviceKind === "tera_hid" && (
                             <div className="rec-row-desc mt-1">
-                              Unlocks at /rec-scanner by scanning this serial, then records against assigned events
+                              Unlocks at /rec-scanner by scanning this serial, then an assigned operator confirms an emailed code
                             </div>
                           )}
                         </div>
@@ -2610,13 +2694,67 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
                   className="rec-select"
                   value={operatorForm.allowedVenues[0] || ""}
                   onChange={(event) => setOperatorForm((previous) => ({ ...previous, allowedVenues: event.target.value ? [event.target.value] : [] }))}
-                  disabled={isTeraOperatorEmail(operatorForm.email)}
                 >
                   <option value="">All venues</option>
-                  {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                  <optgroup label="Entrances and lunch">
+                    {venueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                  </optgroup>
+                  {hallVenueOptions.length > 0 && (
+                    <optgroup label="Halls and session rooms">
+                      {hallVenueOptions.map((venue) => <option key={venue} value={venue}>{venue}</option>)}
+                    </optgroup>
+                  )}
                 </select>
+                {isTeraOperatorEmail(operatorForm.email) && (
+                  <small className="rec-muted">Moving this Tera to an entrance makes it record entrance events there.</small>
+                )}
               </div>
             </div>
+            {isTeraOperatorEmail(operatorForm.email) && (
+              <div>
+                <span className="rec-label">People who can unlock this unit</span>
+                {(operators.find((item) => item.$id === editingOperatorId)?.assignedOperators || []).length ? (
+                  <ul className="rec-muted mb-2">
+                    {operators.find((item) => item.$id === editingOperatorId).assignedOperators.map((person) => (
+                      <li key={person.$id}>{person.name} · {person.email}{person.status !== "active" ? ` (${person.status})` : ""}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="rec-muted mb-2">Nobody yet. Open a person&apos;s operator record and tick this unit.</p>
+                )}
+                <p className="rec-muted mb-2">
+                  The email above is this unit&apos;s own internal address. People sign in at /rec-scanner with their own email after scanning the unit&apos;s code.
+                </p>
+              </div>
+            )}
+            {!isTeraOperatorEmail(operatorForm.email) && (
+              <div>
+                <span className="rec-label">Tera scanners this person can unlock</span>
+                <p className="rec-muted mb-2">
+                  At /rec-scanner they scan the unit&apos;s code, enter this email and confirm the code sent to it.
+                  Only the units ticked here open for them. Unticking a unit signs them out of it within a minute.
+                </p>
+                <div className="rec-checkbox-grid rec-checkbox-grid-compact">
+                  {REC_TERA_HW0009_DEPLOYMENTS.map((unit) => (
+                    <label key={unit.serialNumber} className="rec-checkbox-option">
+                      <input
+                        type="checkbox"
+                        checked={(operatorForm.teraSerials || []).includes(unit.serialNumber)}
+                        onChange={(event) => {
+                          setOperatorForm((previous) => ({
+                            ...previous,
+                            teraSerials: event.target.checked
+                              ? [...(previous.teraSerials || []), unit.serialNumber]
+                              : (previous.teraSerials || []).filter((serial) => serial !== unit.serialNumber),
+                          }))
+                        }}
+                      />
+                      SN {unit.serialNumber} · {unit.deployedLocation}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <span className="rec-label">Allowed Event Types</span>
               <div className="rec-checkbox-grid rec-checkbox-grid-compact">
@@ -2641,27 +2779,69 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             </div>
             {events.length > 0 && (
               <div>
-                <span className="rec-label">Assigned Scan Events</span>
-                <p className="rec-muted mb-2">Leave all unchecked to allow every event of the selected types. Check specific events to lock this Tera/operator to those points only.</p>
-                <div className="rec-checkbox-grid rec-checkbox-grid-compact">
-                  {events.map((scanEvent) => (
-                    <label key={scanEvent.$id} className="rec-checkbox-option">
-                      <input
-                        type="checkbox"
-                        checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
-                        onChange={(event) => {
-                          setOperatorForm((previous) => ({
-                            ...previous,
-                            allowedEventIds: event.target.checked
-                              ? [...previous.allowedEventIds, scanEvent.$id]
-                              : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
-                          }))
-                        }}
-                      />
-                      {scanEvent.name} {scanEvent.venue ? `· ${scanEvent.venue}` : ""}
-                    </label>
-                  ))}
-                </div>
+                <span className="rec-label">
+                  Assigned Scan Events{operatorForm.allowedVenues?.[0] && !showAllOperatorEvents ? ` · ${operatorForm.allowedVenues[0]}` : ""}
+                </span>
+                <p className="rec-muted mb-2">
+                  {operatorForm.allowedVenues?.[0]
+                    ? "Showing the sessions at the chosen venue. Leave all unchecked to allow every event there, or check specific sessions to lock this operator to them."
+                    : "Leave all unchecked to allow every event of the selected types. Check specific events to lock this Tera/operator to those points only."}
+                </p>
+                {operatorForm.allowedVenues?.[0] && (
+                  <label className="rec-checkbox-option mb-2">
+                    <input
+                      type="checkbox"
+                      checked={showAllOperatorEvents}
+                      onChange={(event) => setShowAllOperatorEvents(event.target.checked)}
+                    />
+                    Show all events
+                  </label>
+                )}
+                {operatorEventGroups.length === 0 && (
+                  <p className="rec-muted">No scan events at this venue yet.</p>
+                )}
+                {operatorEventGroups.map((group) => (
+                  <details
+                    key={`${group.venue}-${operatorForm.allowedVenues?.[0] || ""}`}
+                    className="rec-panel mb-2 p-2"
+                    open={group.matchesVenue || operatorEventGroups.length === 1}
+                  >
+                    <summary>
+                      <strong>{group.venue}</strong>
+                      <span className="rec-muted">
+                        {" "}· {group.total} event{group.total === 1 ? "" : "s"}
+                        {group.ticked ? ` · ${group.ticked} ticked` : ""}
+                        {operatorForm.allowedVenues?.[0] && !group.matchesVenue ? " · other venue" : ""}
+                      </span>
+                    </summary>
+                    {group.days.map(([dayLabel, dayEvents]) => (
+                      <div key={dayLabel} className="mt-2">
+                        <small className="rec-muted">{dayLabel}</small>
+                        <div className="rec-checkbox-grid rec-checkbox-grid-compact">
+                          {dayEvents.map((scanEvent) => (
+                            <label key={scanEvent.$id} className="rec-checkbox-option">
+                              <input
+                                type="checkbox"
+                                checked={operatorForm.allowedEventIds.includes(scanEvent.$id)}
+                                onChange={(event) => {
+                                  setOperatorForm((previous) => ({
+                                    ...previous,
+                                    allowedEventIds: event.target.checked
+                                      ? [...previous.allowedEventIds, scanEvent.$id]
+                                      : previous.allowedEventIds.filter((value) => value !== scanEvent.$id),
+                                  }))
+                                }}
+                              />
+                              {[formatTime(scanEvent.startTime), formatTime(scanEvent.endTime)].filter(Boolean).join("–")}
+                              {scanEvent.startTime ? " · " : ""}
+                              {scanEvent.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </details>
+                ))}
               </div>
             )}
             {dayOptions.length > 0 && (
@@ -2846,19 +3026,35 @@ export default function RecScanningAdminWorkspace({ activeView = "events", initi
             />
           </div>
           <div className="rec-field">
-            <label className="rec-label" htmlFor="unregistered-day">Valid on</label>
-            <select
-              id="unregistered-day"
-              className="rec-select"
-              value={unregisteredDay}
-              onChange={(event) => setUnregisteredDay(event.target.value)}
-            >
-              <option value="">Every conference day</option>
-              {(Array.isArray(dayOptions) ? dayOptions : []).filter((day) => day?.label).map((day) => (
-                <option key={day.label} value={day.label}>{day.label} only</option>
-              ))}
-            </select>
+            <label className="rec-label" htmlFor="unregistered-start">Starting number (optional)</label>
+            <input
+              id="unregistered-start"
+              className="rec-input"
+              type="number"
+              min="1"
+              placeholder="Next free number"
+              value={unregisteredStart}
+              onChange={(event) => setUnregisteredStart(event.target.value)}
+            />
           </div>
+          <fieldset className="rec-field">
+            <legend className="rec-label">Valid on (none ticked = every day)</legend>
+            {(Array.isArray(dayOptions) ? dayOptions : []).filter((day) => day?.label).map((day) => (
+              <label key={day.label} className="d-block">
+                <input
+                  type="checkbox"
+                  className="me-2"
+                  checked={unregisteredDays.includes(day.label)}
+                  onChange={(event) => setUnregisteredDays((current) => (
+                    event.target.checked
+                      ? [...current, day.label]
+                      : current.filter((label) => label !== day.label)
+                  ))}
+                />
+                {day.label}
+              </label>
+            ))}
+          </fieldset>
           <div className="rec-field">
             <label className="rec-label" htmlFor="unregistered-category">Participant category</label>
             <select

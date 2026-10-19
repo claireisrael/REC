@@ -39,6 +39,28 @@ function playTone(frequency, durationMs, type = "sine") {
   oscillator.onended = () => context.close().catch(() => {})
 }
 
+// The last operator email used on each unit, so the morning sign-in on the
+// same laptop is one tap. A convenience only; the code is still required.
+const OPERATOR_EMAIL_STORAGE_KEY = "rec.tera.station.operatorEmail"
+
+function readRememberedOperatorEmail(serial) {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(OPERATOR_EMAIL_STORAGE_KEY) || "{}")
+    return typeof saved?.[serial] === "string" ? saved[serial] : ""
+  } catch {
+    return ""
+  }
+}
+
+function rememberOperatorEmail(serial, email) {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(OPERATOR_EMAIL_STORAGE_KEY) || "{}")
+    window.localStorage.setItem(OPERATOR_EMAIL_STORAGE_KEY, JSON.stringify({ ...(saved || {}), [serial]: email }))
+  } catch {
+    // Private windows may block storage; the operator just types it again.
+  }
+}
+
 function playUnlockBeep() {
   playTone(880, 140, "square")
 }
@@ -178,9 +200,21 @@ function UnlockCard({ unit }) {
   )
 }
 
+function isLunchUnit(unit) {
+  return unit?.assignedRole === "Lunch Desk"
+}
+
+// Spare units are suspended until needed, so they are not offered.
+function isSpareUnit(unit) {
+  return unit?.assignedRole === "Spare"
+}
+
 function unitFace(unit, index) {
   if (isGateUnit(unit)) {
-    return { eyebrow: `Gate ${index + 1}`, title: "Main entrance", detail: "" }
+    return { eyebrow: `Entrance ${index + 1}`, title: unit.deployedLocation || "Entrance", detail: "" }
+  }
+  if (isLunchUnit(unit)) {
+    return { eyebrow: `Lunch ${index + 1}`, title: unit.deployedLocation || "Lunch", detail: "" }
   }
   const match = String(unit.deployedLocation || "").match(/^(.*?)\s*\((.*)\)\s*$/)
   return {
@@ -316,6 +350,16 @@ export default function RecScannerPage() {
   const [captureStatus, setCaptureStatus] = useState("")
   const [feedError, setFeedError] = useState("")
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0)
+  // Operator sign-in: after the unit's code is scanned, its assigned
+  // operator confirms an emailed code before the station opens.
+  const [pendingUnit, setPendingUnit] = useState(null)
+  const [operatorEmail, setOperatorEmail] = useState("")
+  const [operatorOtp, setOperatorOtp] = useState({ otpId: "", maskedEmail: "", code: "" })
+  const [operatorBusy, setOperatorBusy] = useState(false)
+  const [operatorError, setOperatorError] = useState("")
+  const [operatorNotice, setOperatorNotice] = useState("")
+  const [stationOperator, setStationOperator] = useState(null)
+  const operatorStepRef = useRef(false)
 
   const alertQueueRef = useRef([])
   const alertSeenRef = useRef(new Set())
@@ -338,7 +382,18 @@ export default function RecScannerPage() {
   }, [])
 
   const focusCapture = useCallback(() => {
+    // Leave the keyboard to the sign-in form while it is open.
+    if (operatorStepRef.current) return
     inputRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  const clearOperatorStep = useCallback(() => {
+    operatorStepRef.current = false
+    setPendingUnit(null)
+    setOperatorOtp({ otpId: "", maskedEmail: "", code: "" })
+    setOperatorBusy(false)
+    setOperatorError("")
+    setOperatorNotice("")
   }, [])
 
   const resetStationState = useCallback((message = "") => {
@@ -369,7 +424,32 @@ export default function RecScannerPage() {
     }
     setCrossStationAlert(null)
     setTally(null)
+    setStationOperator(null)
+    operatorStepRef.current = false
+    setPendingUnit(null)
+    setOperatorOtp({ otpId: "", maskedEmail: "", code: "" })
+    setOperatorBusy(false)
+    setOperatorError("")
+    setOperatorNotice("")
     setHandshakeError(message)
+  }, [])
+
+  // Opens the station from a handshake or verify-otp response.
+  const openStation = useCallback((serial, payload) => {
+    stationTokenRef.current = payload.station.token
+    setSerialNumber(serial)
+    setStationOperator(payload.stationOperator || null)
+    setAllocation({
+      ...(payload.allocation || {}),
+      openEvents: payload.openEvents || [],
+      events: payload.events || [],
+    })
+    setFeedback(
+      payload.openEvents?.length || !payload.stationNotice
+        ? null
+        : { kind: "error", message: payload.stationNotice }
+    )
+    playUnlockBeep()
   }, [])
 
   const unlockStation = useCallback(async (serial) => {
@@ -385,22 +465,21 @@ export default function RecScannerPage() {
       if (!response.ok) {
         throw new Error(payload.error || HID_SCAN_CODES.DEVICE_UNREGISTERED)
       }
+      if (payload.operatorLoginRequired) {
+        // The unit is genuine; now its assigned operator must sign in.
+        operatorStepRef.current = true
+        setPendingUnit({ serial, allocation: payload.allocation || {} })
+        setOperatorOtp({ otpId: "", maskedEmail: "", code: "" })
+        setOperatorError("")
+        setOperatorNotice("")
+        setOperatorEmail(readRememberedOperatorEmail(serial))
+        playUnlockBeep()
+        return
+      }
       if (!payload.station?.token) {
         throw new Error(HID_SCAN_CODES.DEVICE_UNREGISTERED)
       }
-      stationTokenRef.current = payload.station.token
-      setSerialNumber(serial)
-      setAllocation({
-        ...(payload.allocation || {}),
-        openEvents: payload.openEvents || [],
-        events: payload.events || [],
-      })
-      setFeedback(
-        payload.openEvents?.length || !payload.stationNotice
-          ? null
-          : { kind: "error", message: payload.stationNotice }
-      )
-      playUnlockBeep()
+      openStation(serial, payload)
     } catch (error) {
       setHandshakeError(error.message || HID_SCAN_CODES.DEVICE_UNREGISTERED)
       playRejectBuzz()
@@ -408,7 +487,89 @@ export default function RecScannerPage() {
       setLoadingStation(false)
       focusCapture()
     }
-  }, [focusCapture, syncServerClock])
+  }, [focusCapture, openStation, syncServerClock])
+
+  const requestOperatorCode = useCallback(async (event) => {
+    event?.preventDefault()
+    if (!pendingUnit || operatorBusy) return
+    const email = operatorEmail.trim().toLowerCase()
+    if (!email.includes("@")) {
+      setOperatorError("Enter the email address you were assigned with.")
+      return
+    }
+    setOperatorBusy(true)
+    setOperatorError("")
+    setOperatorNotice("")
+    try {
+      const response = await fetch("/api/v1/rec/scanner/tera/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ serialNumber: pendingUnit.serial, email }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      // A code sent moments ago is still valid: go straight to entering it.
+      if (response.status === 429 && payload.details?.otpId) {
+        setOperatorOtp({ otpId: payload.details.otpId, maskedEmail: "", code: "" })
+        setOperatorNotice(payload.error)
+        return
+      }
+      if (!response.ok) throw new Error(payload.error || "Could not send the code.")
+      rememberOperatorEmail(pendingUnit.serial, email)
+      setOperatorOtp({ otpId: payload.otpId, maskedEmail: payload.maskedEmail || "", code: payload.devOtpCode || "" })
+      setOperatorNotice(payload.devOtpCode ? `Test mode: code ${payload.devOtpCode}` : "")
+    } catch (error) {
+      setOperatorError(error.message || "Could not send the code.")
+      playRejectBuzz()
+    } finally {
+      setOperatorBusy(false)
+    }
+  }, [operatorBusy, operatorEmail, pendingUnit])
+
+  const verifyOperatorCode = useCallback(async (event) => {
+    event?.preventDefault()
+    if (!pendingUnit || !operatorOtp.otpId || operatorBusy) return
+    const code = operatorOtp.code.replace(/\D/g, "")
+    if (code.length !== 6) {
+      setOperatorError("Enter the 6-digit code from your email.")
+      return
+    }
+    setOperatorBusy(true)
+    setOperatorError("")
+    try {
+      const response = await fetch("/api/v1/rec/scanner/tera/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          serialNumber: pendingUnit.serial,
+          email: operatorEmail.trim().toLowerCase(),
+          otpId: operatorOtp.otpId,
+          code,
+        }),
+      })
+      syncServerClock(response.headers.get("date"))
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || !payload.station?.token) throw new Error(payload.error || "Could not verify the code.")
+      const serial = pendingUnit.serial
+      clearOperatorStep()
+      openStation(serial, payload)
+      window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 0)
+    } catch (error) {
+      setOperatorError(error.message || "Could not verify the code.")
+      setOperatorOtp((current) => ({ ...current, code: "" }))
+      playRejectBuzz()
+    } finally {
+      setOperatorBusy(false)
+    }
+  }, [clearOperatorStep, openStation, operatorBusy, operatorEmail, operatorOtp, pendingUnit, syncServerClock])
+
+  const cancelOperatorStep = useCallback(() => {
+    if (pendingUnit) lastSerialReadRef.current = { value: pendingUnit.serial, at: Date.now() }
+    clearOperatorStep()
+    setSelectedSerial("")
+    window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 0)
+  }, [clearOperatorStep, pendingUnit])
 
   const processScanQueue = useCallback(async () => {
     if (processingRef.current) return
@@ -433,8 +594,9 @@ export default function RecScannerPage() {
 
         if (!isCurrentStation()) continue
         if (response.status === 401) {
+          // Expired, locked elsewhere, or the operator was unassigned.
           playRejectBuzz()
-          resetStationState("SESSION EXPIRED - SCAN THE STATION QR AGAIN")
+          resetStationState("SESSION ENDED - SCAN THE STATION QR AND SIGN IN AGAIN")
           continue
         }
 
@@ -612,6 +774,8 @@ export default function RecScannerPage() {
       second: "2-digit",
       timeZone: "Africa/Kampala",
     })
+    // While the operator signs in, gun reads are ignored.
+    if (operatorStepRef.current) return
     if (!serialNumber) {
       if (isRepeatRead(lastSerialReadRef, scanned)) {
         setCaptureStatus(`Station QR read again at ${receivedAt} and ignored. Move the Tera away from the screen, then scan once.`)
@@ -799,6 +963,16 @@ export default function RecScannerPage() {
   }, [appendCapturedText, finishSweep])
 
   const lockStation = () => {
+    // End the session on the server too, so the token cannot be reused.
+    const token = stationTokenRef.current
+    if (token) {
+      fetch("/api/v1/rec/scanner/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        keepalive: true,
+      }).catch(() => {})
+    }
     // Hide the unlock QR immediately so a gun still aimed at the screen
     // cannot open this station, or the unit beside it, again.
     lastSerialReadRef.current = { value: serialNumber, at: Date.now() }
@@ -813,8 +987,9 @@ export default function RecScannerPage() {
     focusCapture()
   }
   const locked = !serialNumber
-  const hallUnits = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => !isGateUnit(unit))
   const gateUnits = REC_TERA_HW0009_DEPLOYMENTS.filter(isGateUnit)
+  const lunchUnits = REC_TERA_HW0009_DEPLOYMENTS.filter(isLunchUnit)
+  const hallUnits = REC_TERA_HW0009_DEPLOYMENTS.filter((unit) => !isGateUnit(unit) && !isLunchUnit(unit) && !isSpareUnit(unit))
   const selectedUnit = findUnlockUnit(REC_TERA_HW0009_DEPLOYMENTS, selectedSerial)
   const statusClass = handshakeError
     ? "rec-station-status rec-station-status-error"
@@ -887,20 +1062,90 @@ export default function RecScannerPage() {
             {scanCaptureInput}
           </header>
 
-          <section className="rec-station-hero">
-            <p className="rec-station-kicker">{selectedUnit ? "Step 2 · Scan the code" : "Step 1 · Choose the gun"}</p>
-            <h1>{selectedUnit ? selectedUnit.deployedLocation : "Choose the Tera in your hand"}</h1>
-            <p>
-              {selectedUnit
-                ? `Point this gun at the white code. Only serial ${selectedUnit.serialNumber} unlocks this laptop.`
-                : "Select the hall or gate printed on the gun. The white code appears after that, and only that code unlocks the station."}
-            </p>
-          </section>
+          {pendingUnit ? (
+            <section className="rec-station-hero rec-station-signin" onClick={(event) => event.stopPropagation()}>
+              <p className="rec-station-kicker">Step 3 · Operator sign-in</p>
+              <h1>{pendingUnit.allocation?.deployedLocation || `Tera ${pendingUnit.serial}`}</h1>
+              <p>
+                Tera {pendingUnit.serial} is recognised. Only an operator assigned to this unit can open it.
+              </p>
+              {!operatorOtp.otpId ? (
+                <form className="rec-station-signin-form" onSubmit={requestOperatorCode}>
+                  <label htmlFor="rec-station-operator-email">Your scanner email</label>
+                  <input
+                    id="rec-station-operator-email"
+                    type="email"
+                    autoComplete="email"
+                    autoFocus
+                    required
+                    value={operatorEmail}
+                    onChange={(event) => setOperatorEmail(event.target.value)}
+                    disabled={operatorBusy}
+                  />
+                  <button type="submit" disabled={operatorBusy}>
+                    {operatorBusy ? "Sending…" : "Email me a code"}
+                  </button>
+                </form>
+              ) : (
+                <form className="rec-station-signin-form" onSubmit={verifyOperatorCode}>
+                  <label htmlFor="rec-station-operator-code">
+                    6-digit code sent to {operatorOtp.maskedEmail || operatorEmail}
+                  </label>
+                  <input
+                    id="rec-station-operator-code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    maxLength={6}
+                    pattern="\d{6}"
+                    required
+                    value={operatorOtp.code}
+                    onChange={(event) => {
+                      const code = event.target.value.replace(/\D/g, "").slice(0, 6)
+                      setOperatorOtp((current) => ({ ...current, code }))
+                    }}
+                    disabled={operatorBusy}
+                  />
+                  <button type="submit" disabled={operatorBusy || operatorOtp.code.length !== 6}>
+                    {operatorBusy ? "Checking…" : "Unlock station"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rec-station-signin-link"
+                    disabled={operatorBusy}
+                    onClick={() => {
+                      setOperatorOtp({ otpId: "", maskedEmail: "", code: "" })
+                      setOperatorError("")
+                      setOperatorNotice("")
+                    }}
+                  >
+                    Use a different email or send a new code
+                  </button>
+                </form>
+              )}
+              {operatorNotice && <p className="rec-station-signin-note" role="status">{operatorNotice}</p>}
+              {operatorError && <p className="rec-station-signin-error" role="alert">{operatorError}</p>}
+              <button className="rec-station-back" type="button" onClick={cancelOperatorStep} disabled={operatorBusy}>
+                Cancel
+              </button>
+            </section>
+          ) : (
+            <section className="rec-station-hero">
+              <p className="rec-station-kicker">{selectedUnit ? "Step 2 · Scan the code" : "Step 1 · Choose the gun"}</p>
+              <h1>{selectedUnit ? selectedUnit.deployedLocation : "Choose the Tera in your hand"}</h1>
+              <p>
+                {selectedUnit
+                  ? `Point this gun at the white code. Only serial ${selectedUnit.serialNumber} unlocks this laptop.`
+                  : "Select the hall or gate printed on the gun. The white code appears after that, and only that code unlocks the station."}
+              </p>
+            </section>
+          )}
 
-          {!selectedUnit ? (
+          {pendingUnit ? null : !selectedUnit ? (
             <div className="rec-station-board">
+              <UnitPicker title="Entrance" units={gateUnits} onChoose={chooseUnit} layout="gates" />
+              <UnitPicker title="Lunch" units={lunchUnits} onChoose={chooseUnit} layout="halls" />
               <UnitPicker title="Hall scanners" units={hallUnits} onChoose={chooseUnit} layout="halls" />
-              <UnitPicker title="Main entrance" units={gateUnits} onChoose={chooseUnit} layout="gates" />
             </div>
           ) : (
             <div className="rec-station-solo">
@@ -911,13 +1156,15 @@ export default function RecScannerPage() {
             </div>
           )}
 
-          <div className={statusClass}>
-            {handshakeError
-              ? handshakeError
-              : loadingStation
-                ? "Authorizing this Tera…"
-                : captureStatus || "Waiting for a serial QR. Keep this tab focused."}
-          </div>
+          {!pendingUnit && (
+            <div className={statusClass}>
+              {handshakeError
+                ? handshakeError
+                : loadingStation
+                  ? "Authorizing this Tera…"
+                  : captureStatus || "Waiting for a serial QR. Keep this tab focused."}
+            </div>
+          )}
         </>
       ) : (
         <div className="rec-station-live">
@@ -931,6 +1178,7 @@ export default function RecScannerPage() {
                   <span>
                     {allocation?.assignedRole || "Assigned role pending"} · SN {serialNumber}
                     {allocation?.openEvents?.[0] ? ` · ${allocation.openEvents[0].name}` : ""}
+                    {stationOperator?.name ? ` · Operator: ${stationOperator.name}` : ""}
                   </span>
                 </div>
               </div>

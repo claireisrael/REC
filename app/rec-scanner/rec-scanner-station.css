@@ -953,3 +953,90 @@
     width: min(200px, 70vw);
   }
 }
+
+/* Operator sign-in after the unit's code is scanned. */
+.rec-station-signin-form {
+  display: grid;
+  gap: 10px;
+  width: min(420px, 100%);
+  margin: 22px auto 0;
+  text-align: left;
+}
+
+.rec-station-signin-form label {
+  color: #d5e4ee;
+  font-weight: 700;
+}
+
+.rec-station-signin-form input {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 12px;
+  background: #fffdf9;
+  color: #1c2430;
+  font-size: 1.15rem;
+}
+
+.rec-station-signin-form input[inputmode="numeric"] {
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.rec-station-signin-form input:focus {
+  outline: 3px solid var(--rec-gold);
+  outline-offset: 2px;
+}
+
+.rec-station-signin-form button[type="submit"] {
+  appearance: none;
+  min-height: 52px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--rec-gold);
+  color: #3b2408;
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.rec-station-signin-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rec-station-signin-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #d5e4ee;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rec-station-hero .rec-station-signin-note,
+.rec-station-hero .rec-station-signin-error {
+  width: min(420px, 100%);
+  margin: 14px auto 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.98rem;
+  text-align: left;
+}
+
+.rec-station-hero .rec-station-signin-note {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fffdf9;
+}
+
+.rec-station-hero .rec-station-signin-error {
+  background: #b42318;
+  color: #fff;
+}
+
+.rec-station-signin .rec-station-back {
+  margin-top: 18px;
+}

@@ -31,7 +31,7 @@ test("badge size matches the 93 by 125 millimetre tag", () => {
   )
 })
 
-test("the provided template prints at the template image resolution", async () => {
+test("the provided template prints at the template image resolution",  async () => {
   const png = await renderBadge(sampleBadge, { format: "png" })
   const meta = await sharp(png).metadata()
   assert.equal(meta.width, 2424)

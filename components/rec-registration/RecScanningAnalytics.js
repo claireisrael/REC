@@ -32,6 +32,8 @@ import { formatRecEdition } from "@/lib/rec-conference/rec-edition.mjs"
 const emptyOverview = {
   summary: {},
   byEvent: [],
+  byEventStation: [],
+  stations: [],
   byScanner: [],
   byRegistrationType: [],
   byCountry: [],
@@ -109,6 +111,7 @@ function toEndOfKampalaDay(value) {
 function buildReportParams(conferenceId, filters = {}) {
   const params = new URLSearchParams({ conferenceId })
   if (filters.eventId) params.set("eventId", filters.eventId)
+  if (filters.station) params.set("station", filters.station)
   if (filters.from) params.set("from", toStartOfKampalaDay(filters.from))
   if (filters.to) params.set("to", toEndOfKampalaDay(filters.to))
   return params
@@ -268,8 +271,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
 
   const [conferences, setConferences] = useState([])
   const [conferenceId, setConferenceId] = useState("")
-  const [draftFilters, setDraftFilters] = useState({ eventId: "", from: "", to: "" })
-  const [appliedFilters, setAppliedFilters] = useState({ eventId: "", from: "", to: "" })
+  const [draftFilters, setDraftFilters] = useState({ eventId: "", from: "", to: "", station: "" })
+  const [appliedFilters, setAppliedFilters] = useState({ eventId: "", from: "", to: "", station: "" })
   const [overview, setOverview] = useState(emptyOverview)
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [overviewRefreshing, setOverviewRefreshing] = useState(false)
@@ -284,6 +287,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
   const [eventSummaryLimit, setEventSummaryLimit] = useState(10)
   const [scannerSummaryPageNumber, setScannerSummaryPageNumber] = useState(1)
   const [scannerSummaryLimit, setScannerSummaryLimit] = useState(10)
+  const [eventStationPageNumber, setEventStationPageNumber] = useState(1)
+  const [eventStationLimit, setEventStationLimit] = useState(10)
 
   const [activeDataset, setActiveDataset] = useState("attendance")
   const [attendeePage, setAttendeePage] = useState(emptyPage)
@@ -312,6 +317,11 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
   const eventSummaryPage = useMemo(
     () => paginateRecAnalyticsRows(overview.byEvent, eventSummaryPageNumber, eventSummaryLimit, 10),
     [eventSummaryLimit, eventSummaryPageNumber, overview.byEvent]
+  )
+
+  const eventStationPage = useMemo(
+    () => paginateRecAnalyticsRows(overview.byEventStation || [], eventStationPageNumber, eventStationLimit, 10),
+    [eventStationLimit, eventStationPageNumber, overview.byEventStation]
   )
 
   const scannerSummaryPage = useMemo(
@@ -474,8 +484,8 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
     setOverview(emptyOverview)
     setAttendeePage(emptyPage)
     setScanPage(emptyPage)
-    setDraftFilters({ eventId: "", from: "", to: "" })
-    setAppliedFilters({ eventId: "", from: "", to: "" })
+    setDraftFilters({ eventId: "", from: "", to: "", station: "" })
+    setAppliedFilters({ eventId: "", from: "", to: "", station: "" })
     setEventSummaryPageNumber(1)
     setScannerSummaryPageNumber(1)
     setAttendeePageNumber(1)
@@ -497,19 +507,37 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
     setAppliedFilters(draftFilters)
     setEventSummaryPageNumber(1)
     setScannerSummaryPageNumber(1)
+    setEventStationPageNumber(1)
     setAttendeePageNumber(1)
     setScanPageNumber(1)
   }
 
   const clearReportFilters = () => {
-    const cleared = { eventId: "", from: "", to: "" }
+    const cleared = { eventId: "", from: "", to: "", station: "" }
     setDraftFilters(cleared)
     setLastUpdatedAt("")
     setAppliedFilters(cleared)
     setEventSummaryPageNumber(1)
     setScannerSummaryPageNumber(1)
+    setEventStationPageNumber(1)
     setAttendeePageNumber(1)
     setScanPageNumber(1)
+  }
+
+  // From the event-by-station table: show exactly who that station scanned.
+  const viewEventStation = (row) => {
+    const next = { ...appliedFilters, eventId: row.eventId, station: row.stationKey }
+    setDraftFilters(next)
+    setAppliedFilters(next)
+    setLastUpdatedAt("")
+    setAttendanceFilter("scanned")
+    setActiveDataset("attendance")
+    setEventSummaryPageNumber(1)
+    setScannerSummaryPageNumber(1)
+    setEventStationPageNumber(1)
+    setAttendeePageNumber(1)
+    setScanPageNumber(1)
+    window.setTimeout(() => document.getElementById("rec-analytics-datasets")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0)
   }
 
   const openRegistrant = async (registrationId) => {
@@ -556,6 +584,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
 
   const summary = overview.summary || {}
   const selectedEvent = overview.byEvent?.find((item) => item.eventId === appliedFilters.eventId)
+  const selectedStation = overview.stations?.find((item) => item.key === appliedFilters.station)
 
   return (
     <div className="rec-dashboard-container rec-scanning-analytics-page">
@@ -572,6 +601,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
           <p className="rec-muted mb-0">
             {selectedConference?.title || "Conference reporting"}
             {selectedEvent ? ` / ${selectedEvent.name}` : " / All scan events"}
+            {selectedStation ? ` / ${selectedStation.name}` : ""}
           </p>
           <p className="rec-muted mb-0 mt-1" role="status">
             {overviewRefreshing || dataLoading ? "Updating analytics..." : lastUpdatedAt ? `Updated ${formatDateTime(lastUpdatedAt)}` : "Waiting for first update"}
@@ -626,7 +656,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
       <section className="rec-panel mb-4">
         <div className="rec-panel-header">
           <h3 className="rec-panel-title"><FontAwesomeIcon icon={faFilter} /> Report Filters</h3>
-          {(appliedFilters.eventId || appliedFilters.from || appliedFilters.to) && (
+          {(appliedFilters.eventId || appliedFilters.from || appliedFilters.to || appliedFilters.station) && (
             <span className="rec-status rec-status-published">Filtered report</span>
           )}
         </div>
@@ -643,6 +673,22 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                 <option value="">All scan events</option>
                 {(overview.byEvent || []).map((scanEvent) => (
                   <option key={scanEvent.eventId} value={scanEvent.eventId}>{scanEvent.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rec-field">
+              <label className="rec-label" htmlFor="analytics-station">Station / Entrance</label>
+              <select
+                id="analytics-station"
+                className="rec-select"
+                value={draftFilters.station}
+                onChange={(event) => setDraftFilters((current) => ({ ...current, station: event.target.value }))}
+              >
+                <option value="">All stations</option>
+                {(overview.stations || []).map((station) => (
+                  <option key={station.key} value={station.key}>
+                    {station.name} ({station.uniqueRegistrants.toLocaleString()} participants)
+                  </option>
                 ))}
               </select>
             </div>
@@ -791,6 +837,72 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
             </section>
           </div>
 
+          <section className="rec-panel mb-4">
+            <div className="rec-panel-header">
+              <h3 className="rec-panel-title"><FontAwesomeIcon icon={faQrcode} /> Participants by Event and Station</h3>
+            </div>
+            <div className="rec-panel-body p-0">
+              <p className="rec-muted px-3 pt-3 mb-2">
+                Every entrance records into the day&apos;s entrance event, so each station is listed separately.
+                Choose View participants to see exactly who was scanned at that station.
+              </p>
+              <div className="rec-table-wrap rec-responsive-table">
+                <table className="rec-table rec-analytics-event-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Station</th>
+                      <th>Participants</th>
+                      <th>Repeat scans</th>
+                      <th>Rejected</th>
+                      <th>Last scan</th>
+                      <th aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eventStationPage.documents.map((row) => (
+                      <tr key={row.key}>
+                        <td data-label="Event">
+                          <strong className="rec-row-title">{row.eventName}</strong>
+                          <small>{row.day ? `Day ${row.day}` : "Any day"}{row.venue ? ` / ${row.venue}` : ""}</small>
+                        </td>
+                        <td data-label="Station">
+                          {row.stationName}
+                          <small>{row.kind === "tera" ? "Tera scanner" : "Phone scanner"}</small>
+                        </td>
+                        <td data-label="Participants"><strong>{row.uniqueRegistrants.toLocaleString()}</strong></td>
+                        <td data-label="Repeat scans">{row.duplicates.toLocaleString()}</td>
+                        <td data-label="Rejected">{row.rejected.toLocaleString()}</td>
+                        <td data-label="Last scan">{row.lastScanAt ? formatDateTime(row.lastScanAt) : "-"}</td>
+                        <td data-label="Actions">
+                          <button type="button" className="rec-btn rec-btn-outline rec-btn-sm" onClick={() => viewEventStation(row)}>
+                            View participants
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!eventStationPage.total && (
+                      <tr><td colSpan="7"><div className="rec-empty-state rec-empty-state-compact">No scans in this report yet.</div></td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {eventStationPage.total > 0 && (
+                <div className="rec-panel-body rec-analytics-pagination-body rec-analytics-summary-pagination">
+                  <Pagination
+                    pageData={eventStationPage}
+                    onPageChange={setEventStationPageNumber}
+                    onLimitChange={(nextLimit) => {
+                      setEventStationLimit(nextLimit)
+                      setEventStationPageNumber(1)
+                    }}
+                    itemLabel="event station"
+                  />
+                </div>
+              )}
+            </div>
+          </section>
+
           <div className="rec-analytics-breakdown-grid mb-4">
             <section className="rec-panel">
               <div className="rec-panel-header"><h3 className="rec-panel-title">Registration Types</h3></div>
@@ -847,12 +959,13 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
             </section>
           </div>
 
-          <section className="rec-panel mb-4">
+          <section className="rec-panel mb-4" id="rec-analytics-datasets">
             <div className="rec-panel-header rec-analytics-table-header">
               <div>
                 <h3 className="rec-panel-title">
                   <FontAwesomeIcon icon={activeDataset === "attendance" ? faUserGroup : faQrcode} />
                   {activeDataset === "attendance" ? "Registrant Attendance" : "Scan Audit Log"}
+                  {selectedStation ? ` · ${selectedStation.name}` : ""}
                 </h3>
                 <p className="rec-muted mb-0">
                   {activeDataset === "attendance"
@@ -1011,6 +1124,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                           <td data-label="Last Scan">
                             {row.lastScanAt ? formatDateTime(row.lastScanAt) : "No accepted scan"}
                             {row.lastScanEventName && <small>{row.lastScanEventName}{row.lastScanVenue ? ` · ${row.lastScanVenue}` : ""}</small>}
+                            {row.stations?.length > 0 && <small>Scanned at {row.stations.join(" · ")}</small>}
                           </td>
                         </tr>
                       ))}
@@ -1132,7 +1246,7 @@ export default function RecScanningAnalytics({ initialConferenceId = "" }) {
                             {row.reason && <small>{humanize(row.reason)}</small>}
                           </td>
                           <td data-label="Scanner">
-                            {row.scannerName}
+                            {row.stationName || row.scannerName}
                             {row.deviceLabel && row.deviceLabel !== row.scannerName && <small>{row.deviceLabel}</small>}
                           </td>
                         </tr>

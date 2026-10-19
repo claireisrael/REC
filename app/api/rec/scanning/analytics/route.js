@@ -15,6 +15,7 @@ export async function GET(request) {
       eventId: searchParams.get("eventId") || "",
       from: searchParams.get("from") || "",
       to: searchParams.get("to") || "",
+      station: searchParams.get("station") || "",
     }))
   } catch (error) {
     return recScanningErrorResponse(error, "Failed to load REC scan analytics")

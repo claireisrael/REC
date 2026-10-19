@@ -12,6 +12,7 @@ import {
   formatDelegateSerial,
   formatRecBadgeCardCopy,
   formatRecBadgeDayTag,
+  formatRecBadgeDaysTag,
   formatRecWalkInBadgeName,
   readDelegateSerial,
   resolveRecBadgeRole,
@@ -76,6 +77,14 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
     { name: "Delegate", underName: "" }
   )
   assert.deepEqual(
+    formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Tess Talemwa", organization: "Not provided" }),
+    { name: "Tess Talemwa", underName: "" }
+  )
+  assert.deepEqual(
+    formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Ritah Isiko", organization: "LocalMotion Safaris" }),
+    { name: "Ritah Isiko", underName: "LocalMotion Safaris" }
+  )
+  assert.deepEqual(
     formatRecBadgeCardCopy({
       registrationType: "Unregistered",
       organization: "D-121",
@@ -90,11 +99,22 @@ test("the badge prints \"Delegate\" for attendee registrations, other types unch
       organization: "D-002",
       daysAttending: ["19th October – Day 1", "22nd October - Day 4"],
     }),
-    { name: "Delegate", underName: "D-002" }
+    { name: "Delegate", underName: "D-002 · 19 & 22 OCT" }
   )
   assert.equal(formatRecWalkInBadgeName({ registrationType: "Unregistered", badgeRole: "Press", lastName: "REC26-000009" }), "Press REC26-000009")
   assert.equal(formatRecBadgeDayTag("22nd October - Day 4"), "22 OCT")
   assert.equal(formatRecBadgeDayTag("Day 4"), "")
+  assert.equal(formatRecBadgeDaysTag(["20th October – Day 2", "21st October – Day 3"]), "20 & 21 OCT")
+  assert.equal(formatRecBadgeDaysTag(["19th October – Day 1"]), "19 OCT")
+  assert.equal(formatRecBadgeDaysTag(["19th October – Day 1", "20th October – Day 2", "21st October – Day 3", "22nd October - Day 4"]), "")
+  assert.deepEqual(
+    formatRecBadgeCardCopy({
+      registrationType: "Unregistered",
+      organization: "D-101",
+      daysAttending: ["21st October – Day 3", "22nd October - Day 4"],
+    }),
+    { name: "Delegate", underName: "D-101 · 21 & 22 OCT" }
+  )
   assert.deepEqual(
     formatRecBadgeCardCopy({ registrationType: "Attendee", name: "Claire Namagala", organization: "NREP" }),
     { name: "Claire Namagala", underName: "NREP" }
